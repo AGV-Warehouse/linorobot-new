@@ -384,3 +384,33 @@ drive directions, and the robot visibly tracks straight — lateral drift under
 ~10 cm over 3 m. If it still veers with angular.z ≈ 0, the residual is
 mechanical (wheel diameter mismatch / slip) — measure the wheels, don't retune
 the trim.
+
+## 16. Under-cart docking port: cart_leg_detector + rf2o kill switch
+
+**What changed (2026-08-03, ported from the old repo's
+`claude/camera-stack-decision-w8ivuc` branch):** tagless under-cart docking
+groundwork. `linorobot2_navigation/scripts/cart_leg_detector.py` (with
+`config/cart_leg_detector.yaml` and `launch/cart_leg_detector.launch.py`)
+finds the cart's four legs in `/scan_raw` and publishes `detected_dock_pose`
+for the Nav2 docking server (`use_external_detection_pose: true` was already
+set in `navigation.yaml`). `robot.launch.py` gains an `rf2o:=false` argument
+to drop rf2o entirely once the EKF is trusted (this repo's EKF already owned
+the odom TF, so only the kill switch and header rationale were ported), plus
+a header warning that the Teensy firmware can double-publish `imu/data`.
+
+Verification lives in **UNDER_CART_DOCKING.md** — Phase 0 (cart geometry
+gate + scan-quality bags), Phase 1 (detector acceptance: ≥95 % detection
+within 2 m, σ ≤ 1 cm hold jitter, no orientation flips, zero false positives
+with gating), Phase 2 (odometry checks; the EKF-owns-TF regression items were
+already covered by sections 3–4 here).
+
+Quick smoke test after building:
+
+```bash
+ros2 launch linorobot2_navigation cart_leg_detector.launch.py   # standalone
+ros2 launch linorobot2_bringup robot.launch.py rf2o:=false      # kill switch
+```
+
+**Pass:** detector starts and logs its rectangle config, `ros2 node list`
+shows no `rf2o_laser_odometry` when `rf2o:=false`, and
+`odom->base_footprint` is still published (by `ekf_filter_node`).

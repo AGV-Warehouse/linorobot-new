@@ -18,9 +18,9 @@
 # Nav2 docking server consumes when `use_external_detection_pose: true`
 # (see linorobot2_navigation/config/navigation.yaml, docking_server).
 #
-# Subscribes to /scan_raw (the FULL 360 deg scan, before the angle filter
-# crops it to the front 180 deg) so the legs beside/behind the robot stay
-# visible while it is driving underneath the cart.
+# Subscribes to /scan_raw (the FULL 360 deg scan, before the laser filter
+# masks the battery box out of it) so every leg beside/behind the robot —
+# battery sector included — stays visible while it drives under the cart.
 #
 # Pipeline per scan:
 #   points (odom frame) -> gap clustering -> leg-sized clusters ->
