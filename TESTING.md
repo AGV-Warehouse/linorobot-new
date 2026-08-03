@@ -384,3 +384,35 @@ drive directions, and the robot visibly tracks straight — lateral drift under
 ~10 cm over 3 m. If it still veers with angular.z ≈ 0, the residual is
 mechanical (wheel diameter mismatch / slip) — measure the wheels, don't retune
 the trim.
+
+## 17. rosbridge for the AGV fleet web app
+
+(§16 lives on the under-cart docking port branch, `claude/port-w8ivucto-18pdbo` — the numbering gap closes when both merge.)
+
+**What changed (2026-08-03, ported from the old repo's
+`claude/agv-robot-control-integration-os9no6` branch):** `robot.launch.py`
+now starts `rosbridge_server` (WebSocket, port 9090) and `rosapi` so the
+agvapp web UI can drive the robot and stream its position — `/amcl_pose`,
+`/map`, `/cmd_vel`, `/goal_pose` and the Nav2 cancel service flow through
+it. Disable with `rosbridge:=false`; port via `rosbridge_port:=<n>`.
+Also: `rosbridge_server`/`rosapi` exec_depends in `linorobot2_bringup`,
+`ros-$ROS_DISTRO-rosbridge-suite` in `install.bash`, a standalone
+`rosbridge` service in `docker/docker-compose.yaml`, and a README section
+("Web fleet app (rosbridge)") with the start order and the 30-second
+`/initialpose` rule.
+
+Verify (needs `sudo apt install ros-jazzy-rosbridge-suite` once):
+
+```bash
+ros2 launch linorobot2_bringup robot.launch.py
+# from a laptop on the LAN:
+python3 -c "import websocket; ws=websocket.create_connection('ws://<robot-ip>:9090'); \
+ws.send('{\"op\":\"subscribe\",\"topic\":\"/scan\"}'); print(ws.recv()[:120])"
+```
+
+**Pass:** the WebSocket connects and the subscribe returns `/scan` messages;
+with `rosbridge:=false`, `ros2 node list` shows neither
+`rosbridge_websocket` nor `rosapi`, and nothing listens on 9090
+(`ss -tlnp | grep 9090`). Jetson CPU note: rosbridge is idle-cheap but
+serializing `/map` or high-rate `/scan` subscriptions costs CPU — the web
+app should throttle its subscriptions (see `agvapp/docs/ros-bridge-contract.md`).
