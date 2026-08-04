@@ -35,4 +35,7 @@ cart_leg_detector:
     filter_alpha: 0.3        # EMA weight of a new detection (1.0 = no filter)
     detection_timeout: 1.0   # s without acceptance before the filter resets
     output_frame: odom       # docking server fixed_frame (navigation.yaml)
+    base_frame: base_footprint  # used to aim the entry axis at the robot
+                             # on a fresh lock: park square-on to the side
+                             # you want to enter before the detector locks
     publish_markers: true    # RViz debugging on cart_leg_detector/markers

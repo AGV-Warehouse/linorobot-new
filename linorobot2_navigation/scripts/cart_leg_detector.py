@@ -101,6 +101,7 @@ class CartLegDetector(Node):
         self.declare_parameter('filter_alpha', 0.3)
         self.declare_parameter('detection_timeout', 1.0)
         self.declare_parameter('output_frame', 'odom')
+        self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('publish_markers', True)
 
         self.tf_buffer = tf2_ros.Buffer()
@@ -343,24 +344,36 @@ class CartLegDetector(Node):
 
     def accept(self, h, prior, stamp):
         yaw = h.yaw
-        # The rectangle is symmetric: yaw, yaw+pi (and +/-pi/2 when square)
-        # describe the same legs. Pick the candidate nearest the prior so the
-        # published pose does not flip frame-to-frame.
-        ref = prior[2] if prior is not None else None
-        if ref is not None:
-            candidates = [yaw, normalize_angle(yaw + math.pi)]
-            if abs(self.p('rect_length') - self.p('rect_width')) \
-                    <= self.p('dim_tolerance'):
-                candidates += [normalize_angle(yaw + math.pi / 2.0),
-                               normalize_angle(yaw - math.pi / 2.0)]
-            yaw = min(candidates,
-                      key=lambda a: abs(normalize_angle(a - ref)))
-
-        alpha = self.p('filter_alpha')
+        # The rectangle is symmetric: yaw, yaw+pi and yaw+/-pi/2 all describe
+        # the same legs, but the published yaw is the docking ENTRY axis
+        # (the server stages staging_x_offset along it and drives in along
+        # +x), so the tie-break decides which side the robot enters from.
+        # While locked, keep the previous yaw so the pose never flips
+        # mid-entry. On a fresh lock, aim the axis from the robot through
+        # the cart center: the entry is straight in from wherever the robot
+        # is parked, never around the side.
         now = Time.from_msg(stamp)
         stale = (self.last_accept_time is None or
                  (now - self.last_accept_time) >
                  Duration(seconds=self.p('detection_timeout')))
+        candidates = [yaw, normalize_angle(yaw + math.pi),
+                      normalize_angle(yaw + math.pi / 2.0),
+                      normalize_angle(yaw - math.pi / 2.0)]
+        ref = None
+        if not stale and self.filtered is not None:
+            ref = self.filtered[2]
+        elif prior is not None and prior is not self.filtered:
+            ref = prior[2]  # expected_cart_* seed (gate_prior built it)
+        if ref is None:
+            robot = self.lookup_2d(self.p('output_frame'),
+                                   self.p('base_frame'), stamp)
+            if robot is not None:
+                ref = math.atan2(h.cy - robot[1], h.cx - robot[0])
+        if ref is not None:
+            yaw = min(candidates,
+                      key=lambda a: abs(normalize_angle(a - ref)))
+
+        alpha = self.p('filter_alpha')
         if self.filtered is None or stale:
             self.filtered = (h.cx, h.cy, yaw)
         else:

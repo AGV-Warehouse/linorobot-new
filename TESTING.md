@@ -414,3 +414,25 @@ ros2 launch linorobot2_bringup robot.launch.py rf2o:=false      # kill switch
 **Pass:** detector starts and logs its rectangle config, `ros2 node list`
 shows no `rf2o_laser_odometry` when `rf2o:=false`, and
 `odom->base_footprint` is still published (by `ekf_filter_node`).
+
+### 16b. Entry axis aims at the robot (2026-08-04)
+
+**What changed:** attempt #1–2 on the practice table clipped a leg because
+the published yaw was always the rectangle's *long axis* with an arbitrary
+sign — the docking server obediently curved around to enter side-on. Now
+`accept()` considers all four rectangle axes and, on a fresh lock, picks the
+one pointing from the robot (`base_frame`) through the cart center; while
+locked it keeps the previous yaw (no flips mid-entry). Also in
+`navigation.yaml`: approach slowed to a 0.02–0.05 m/s crawl
+(`v_angular_max` 0.3, `dock_approach_timeout` 60 s) and
+`dock_collision_threshold` raised to 0.8 — the legs ARE the destination, at
+0.3 every entry aborted with `Collision detected ... Failed to get control`.
+
+**Test:** park the robot ~1 m out, square-on to a side of the practice
+table, start the detector fresh, `ros2 topic echo /detected_dock_pose --once`.
+
+**Pass:** the pose's yaw points from the robot toward the cart center
+(quaternion ≈ robot's own heading when parked square-on). Repark on a
+different side, restart the detector: yaw follows the robot. During a dock
+approach the yaw must NOT flip (watch the RViz arrow). Docking: one smooth
+straight-in creep, no abort-retry swing, stop within 5 cm of center.

@@ -143,6 +143,11 @@ Preflight (terminal 4):
 - [ ] Robot pre-positioned by teleop ~1 m in front of the cart, roughly
   facing it (first attempts skip staging navigation). Floor clear, cart
   clearance verified (Phase 0).
+- [ ] The entry axis is chosen when the detector first locks: it aims from
+  the robot through the cart center, so park **square-on to the side you
+  want to enter** (the long side has the bigger leg gap) BEFORE starting
+  the detector. If you reposition to a different side afterwards, restart
+  the detector (terminal 3) to re-lock the axis.
 
 Send the goal, filling x/y/z/w from the echoed `detected_dock_pose`
 (keep `--feedback`; Ctrl-C on this command CANCELS the goal and stops the
