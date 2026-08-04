@@ -22,14 +22,14 @@ cart_leg_detector:
     # the expected pose below) are rejected. Set 0.0 ONLY for offline bag
     # exploration.
     gate_radius: 0.5
-    # Seed pose before the first detection. Set expected_dock_frame to ''
+    # Seed pose before the first detection. Set expected_cart_frame to ''
     # to disable, 'map' to give the pose in map coordinates (transformed via
     # TF), or 'odom' to give it directly in the output frame. Phase 3 wires
     # this to the dock database entry.
-    expected_dock_frame: ''
-    expected_dock_x: 0.0
-    expected_dock_y: 0.0
-    expected_dock_yaw: 0.0
+    expected_cart_frame: ''
+    expected_cart_x: 0.0
+    expected_cart_y: 0.0
+    expected_cart_yaw: 0.0
 
     # ---- Output
     filter_alpha: 0.3        # EMA weight of a new detection (1.0 = no filter)

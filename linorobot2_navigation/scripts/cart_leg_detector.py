@@ -91,12 +91,12 @@ class CartLegDetector(Node):
         # accepted (or expected) pose. 0 disables gating -- bag testing only;
         # gating is the guard against look-alike leg patterns.
         self.declare_parameter('gate_radius', 0.5)
-        # Expected dock pose used to seed the gate before the first
+        # Expected cart pose used to seed the gate before the first
         # detection. Frame '' disables the seed.
-        self.declare_parameter('expected_dock_frame', '')
-        self.declare_parameter('expected_dock_x', 0.0)
-        self.declare_parameter('expected_dock_y', 0.0)
-        self.declare_parameter('expected_dock_yaw', 0.0)
+        self.declare_parameter('expected_cart_frame', '')
+        self.declare_parameter('expected_cart_x', 0.0)
+        self.declare_parameter('expected_cart_y', 0.0)
+        self.declare_parameter('expected_cart_yaw', 0.0)
         # Output smoothing / bookkeeping.
         self.declare_parameter('filter_alpha', 0.3)
         self.declare_parameter('detection_timeout', 1.0)
@@ -154,16 +154,16 @@ class CartLegDetector(Node):
 
     def gate_prior(self, stamp):
         """Pose the gate compares against: fresh filtered pose, else the
-        expected dock pose (transformed into output_frame), else None."""
+        expected cart pose (transformed into output_frame), else None."""
         timeout = Duration(seconds=self.p('detection_timeout'))
         if (self.filtered is not None and self.last_accept_time is not None
                 and (Time.from_msg(stamp) - self.last_accept_time) < timeout):
             return self.filtered
-        frame = self.p('expected_dock_frame')
+        frame = self.p('expected_cart_frame')
         if not frame:
             return self.filtered  # stale prior still better than nothing
-        x, y = self.p('expected_dock_x'), self.p('expected_dock_y')
-        yaw = self.p('expected_dock_yaw')
+        x, y = self.p('expected_cart_x'), self.p('expected_cart_y')
+        yaw = self.p('expected_cart_yaw')
         if frame != self.p('output_frame'):
             tf2d = self.lookup_2d(self.p('output_frame'), frame, stamp)
             if tf2d is None:

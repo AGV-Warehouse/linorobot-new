@@ -74,8 +74,12 @@ Watch `cart_leg_detector/markers` in RViz: orange spheres = leg candidates,
 green rectangle = accepted fit, blue arrow = filtered `detected_dock_pose`.
 
 For offline bag exploration set `gate_radius: 0.0` (accept anything); for
-any live use keep gating on and seed `expected_dock_*` — gating is the guard
+any live use keep gating on and seed `expected_cart_*` — gating is the guard
 against look-alike leg patterns (racking, chairs, a second cart).
+
+Naming note: the detector's own knobs use "cart" (`expected_cart_*`), but
+the output topic stays `detected_dock_pose` — that name is hardcoded in
+Nav2's `SimpleChargingDock` plugin and cannot be renamed on our side.
 
 Acceptance:
 
