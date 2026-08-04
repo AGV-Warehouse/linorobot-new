@@ -463,7 +463,13 @@ docking_server:
       transform_tolerance: 0.1
       projection_time: 5.0
       simulation_step: 0.1
-      dock_collision_threshold: 0.3
+      # Radius around the dock pose where collisions are FORGIVEN. Driving
+      # under the cart means the "obstacle" (legs, up to ~0.65 m from the
+      # rectangle center) is the destination: 0.3 aborted every entry
+      # ("Collision detected ... Failed to get control"). 0.8 covers the
+      # whole under-cart zone — inside it the human on Ctrl-C is the
+      # collision monitor; outside it detection still protects the approach.
+      dock_collision_threshold: 0.8
 
 loopback_simulator:
   ros__parameters:
