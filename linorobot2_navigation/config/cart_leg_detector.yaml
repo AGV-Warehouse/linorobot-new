@@ -1,10 +1,12 @@
 cart_leg_detector:
   ros__parameters:
     # ---- Cart geometry: MEASURE THE REAL CART (Phase 0 checklist in
-    # UNDER_CART_DOCKING.md) and replace these placeholders. All values in
-    # meters, leg spacings measured center-of-leg to center-of-leg.
-    rect_length: 0.90        # longer leg-to-leg spacing
-    rect_width: 0.60         # shorter leg-to-leg spacing
+    # UNDER_CART_DOCKING.md). All values in meters, leg spacings measured
+    # center-of-leg to center-of-leg.
+    # Current values: the PRACTICE TABLE (2026-08-04) — 110 cm x 27.5 in,
+    # 1.5 in legs. Re-measure and replace when the real cart arrives.
+    rect_length: 1.10        # longer leg-to-leg spacing
+    rect_width: 0.70         # shorter leg-to-leg spacing
     leg_diameter: 0.04       # leg cross-section as the lidar sees it
 
     # ---- Matching tolerances
