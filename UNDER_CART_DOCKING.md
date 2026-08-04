@@ -113,3 +113,65 @@ Regression:
 Known caveat: with `micro_ros:=false` there is no wheel odometry, the EKF
 has no input, and the odom TF goes stale — keep the agent running even for
 hand-push sessions.
+
+## Phase 3 — First docking attempt (practice table)
+
+The docking server starts with the nav stack (`navigation.launch.py` →
+nav2_bringup) and already consumes `detected_dock_pose`
+(`use_external_detection_pose: true`). The external-detection offsets in
+`navigation.yaml` are zeroed for the leg detector — the upstream `-1.57`
+roll/pitch example values are AprilTag corrections and MUST stay 0 here.
+
+Stack (4 terminals):
+
+```bash
+ros2 launch linorobot2_bringup robot.launch.py slam:=false   # 1: bringup, nav mode
+ros2 launch linorobot2_navigation navigation.launch.py      # 2: Nav2 (+ docking server)
+# set the AMCL pose within ~30 s (map page :8000) — pose_keeper may restore it
+ros2 launch linorobot2_navigation cart_leg_detector.launch.py   # 3: detector
+```
+
+Preflight (terminal 4):
+
+- [ ] `ros2 topic echo /detected_dock_pose --once` → stable pose at the cart
+  center (this is the Phase 1/2 static test).
+- [ ] `ros2 lifecycle get /docking_server` → `active`.
+- [ ] Robot pre-positioned by teleop ~1 m in front of the cart, roughly
+  facing it (first attempts skip staging navigation). Floor clear, cart
+  clearance verified (Phase 0).
+
+Send the goal, filling x/y/z/w from the echoed `detected_dock_pose`
+(keep `--feedback`; Ctrl-C on this command CANCELS the goal and stops the
+approach — that is the abort button):
+
+```bash
+ros2 action send_goal /dock_robot nav2_msgs/action/DockRobot \
+  "{use_dock_id: false, dock_type: simple_charging_dock, navigate_to_staging_pose: false, \
+    dock_pose: {header: {frame_id: odom}, pose: {position: {x: X, y: Y}, orientation: {z: Z, w: W}}}}" \
+  --feedback
+```
+
+The server drives to the staging point (`staging_x_offset: -0.7` → 0.7 m in
+front of the cart center), then creeps forward, continuously refining
+against `detected_dock_pose`, until the base sits within `docking_threshold`
+(5 cm) of the cart center. No charger contact exists, so success == pose
+(battery/stall checks are off).
+
+Back out:
+
+```bash
+ros2 action send_goal /undock_robot nav2_msgs/action/UndockRobot \
+  "{dock_type: simple_charging_dock}"
+```
+
+Acceptance:
+
+- [ ] Approach is smooth (no oscillation at the 0.05 m/s crawl); robot stops
+  under the cart center within ~5 cm laterally.
+- [ ] Detector holds lock during the whole approach (echo keeps streaming —
+  the entry-occlusion case).
+- [ ] Ctrl-C mid-approach stops the robot promptly (cancel path works).
+- [ ] Undock returns it cleanly ~0.7 m out the way it came.
+
+Once this passes, enable staging navigation (`navigate_to_staging_pose:
+true`) so Nav2 plans the drive to the staging point from anywhere on the map.

@@ -428,10 +428,16 @@ docking_server:
       use_stall_detection: false # true
 
       external_detection_timeout: 1.0
-      external_detection_translation_x: -0.18
+      # detected_dock_pose comes from cart_leg_detector.py: a planar,
+      # ROS-convention pose at the cart's leg-rectangle center (odom frame).
+      # No frame correction is needed — the -1.57 roll/pitch values from the
+      # upstream example are for AprilTag camera detections and would tip
+      # this pose out of the plane. Keep translations 0 to dock at the
+      # cart center; nudge translation_x only to bias the final stop point.
+      external_detection_translation_x: 0.0
       external_detection_translation_y: 0.0
-      external_detection_rotation_roll: -1.57
-      external_detection_rotation_pitch: -1.57
+      external_detection_rotation_roll: 0.0
+      external_detection_rotation_pitch: 0.0
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
 
