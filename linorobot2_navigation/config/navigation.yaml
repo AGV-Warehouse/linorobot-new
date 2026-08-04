@@ -408,7 +408,7 @@ docking_server:
     controller_frequency: 50.0
     initial_perception_timeout: 5.0
     wait_charge_timeout: 5.0
-    dock_approach_timeout: 30.0
+    dock_approach_timeout: 60.0  # crawl speed needs the extra time
     undock_linear_tolerance: 0.05
     undock_angular_tolerance: 0.1
     max_retries: 3
@@ -452,8 +452,11 @@ docking_server:
     controller:
       k_phi: 3.0
       k_delta: 2.0
-      v_linear_min: 0.15
-      v_linear_max: 0.15
+      # Crawl speed: the approach threads between the cart legs; 0.15 was
+      # fast enough to clip a leg on attempt #1. Keep this slow.
+      v_linear_min: 0.02
+      v_linear_max: 0.05
+      v_angular_max: 0.3
       use_collision_detection: true
       costmap_topic: "local_costmap/costmap_raw"
       footprint_topic: "local_costmap/published_footprint"
