@@ -24,10 +24,16 @@ cart_leg_detector:
     gate_radius: 0.5
     # Seed pose before the first detection. Set expected_cart_frame to ''
     # to disable, 'map' to give the pose in map coordinates (transformed via
-    # TF), or 'odom' to give it directly in the output frame. Phase 3 wires
-    # this to the dock database entry.
-    expected_cart_frame: ''
-    expected_cart_x: 0.0
+    # TF), or 'odom' to give it directly in the output frame.
+    # 'base_footprint' makes the seed ROBOT-RELATIVE: "the cart center is
+    # ~1.4 m straight ahead of wherever I'm parked when the detector
+    # starts" (1 m standoff + half the 1.10 m table). Without a seed, a
+    # fresh start locks onto the closest leg-like pair — the wire shelf
+    # 0.5 m beside the robot won attempt #4. Caveat: the seed tracks the
+    # robot, so a lock LOST while under the cart (>detection_timeout)
+    # cannot re-acquire — the seed then points 1.4 m past the cart.
+    expected_cart_frame: 'base_footprint'
+    expected_cart_x: 1.4
     expected_cart_y: 0.0
     expected_cart_yaw: 0.0
 
