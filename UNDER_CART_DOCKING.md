@@ -23,6 +23,7 @@ Phases: **0** geometry gate (this checklist) → **1** leg detector →
 | 3 | Leg spacing, shorter, center ↔ center | record | `rect_width` |
 | 4 | Leg spacing, longer, center ↔ center | record | `rect_length` |
 | 5 | Leg cross-section (width the lidar sees) & shape | record; flag if < 25 mm or chromed/shiny | `leg_diameter` |
+| 5b | Measure 3–4 **at lidar scan height**, not the top — angled legs differ (practice table: 0.70 at top, 0.64 at scan height). Best source: the detector's own leg markers | record | `rect_*` |
 | 6 | Lidar scan-plane height vs. leg | scan plane must hit **bare leg**, below any cross-brace/shelf | go/no-go |
 | 7 | Is the leg rectangle square (length ≈ width)? | if yes, note it — pose has 90° ambiguity, detector needs the expected-pose seed | detector config |
 
