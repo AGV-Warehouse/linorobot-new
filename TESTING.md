@@ -436,3 +436,16 @@ table, start the detector fresh, `ros2 topic echo /detected_dock_pose --once`.
 different side, restart the detector: yaw follows the robot. During a dock
 approach the yaw must NOT flip (watch the RViz arrow). Docking: one smooth
 straight-in creep, no abort-retry swing, stop within 5 cm of center.
+
+**Preflight gate (use before EVERY dock goal):**
+
+```bash
+python3 linorobot2_navigation/scripts/dock_preflight.py
+```
+
+Checks the live detection + TF geometry (distance, lateral offset from the
+entry line, axis/bearing/heading agreement) and on PASS prints the exact
+`send_goal` command. **Pass:** FAILs with actionable reasons when the robot
+is off the entry line or the lock is bad; PASSes and prints the command when
+parked square-on the entry line at 0.9–2.5 m. Send promptly after a PASS —
+stationary odom yaw drifts ~1 deg/min on this robot.
