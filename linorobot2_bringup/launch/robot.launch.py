@@ -149,6 +149,17 @@ def generate_launch_description():
             description='Path to the map_viewer.py web viewer script'
         ),
         DeclareLaunchArgument(
+            name='map_viewer_spots',
+            default_value=PathJoinSubstitution(
+                [FindPackageShare('linorobot2_navigation'), 'maps',
+                 'apartment_map_3.spots.json']
+            ),
+            description='Cart parking spots the map page reads and writes. '
+                        'Keep the map name in sync with MAP_NAME in '
+                        'navigation.launch.py; the viewer logs the path it '
+                        'resolved at startup so a mismatch is visible.'
+        ),
+        DeclareLaunchArgument(
             name='slam',
             default_value='true',
             description='Start slam_toolbox (mapping). Set false when running '
@@ -313,14 +324,17 @@ def generate_launch_description():
         # degrade gracefully if the path is wrong (e.g. a stale install or a
         # map_viewer_path override): log a pointer and keep the rest of the
         # stack up instead of taking the whole launch down.
+        #
+        # $0 is the script, $1 the parking-spot file (sh -c '...' A B).
         ExecuteProcess(
             condition=IfCondition(LaunchConfiguration('map_viewer')),
             cmd=['/bin/sh', '-c',
-                 'if [ -f "$0" ]; then exec python3 "$0"; else '
+                 'if [ -f "$0" ]; then exec python3 "$0" --spots "$1"; else '
                  'echo "[map_viewer] $0 not found -- skipping the web map viewer. '
                  'Set map_viewer_path:=<path> or silence this with map_viewer:=false."; '
                  'fi',
-                 LaunchConfiguration('map_viewer_path')],
+                 LaunchConfiguration('map_viewer_path'),
+                 LaunchConfiguration('map_viewer_spots')],
             output='screen',
         ),
     ])

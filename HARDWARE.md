@@ -23,7 +23,9 @@ Update this file whenever wiring or hardware changes.
 - `/dev/ttyUSB0` — RPLIDAR.
 - Port **8000** — live map web page served by `robot.launch.py`
   (`http://<robot-ip>:8000`, or `ssh -L 8000:localhost:8000`). Used to set
-  the AMCL initial pose and click nav goals.
+  the AMCL initial pose, click nav goals, and draw cart parking spots
+  (saved to `linorobot2_navigation/maps/<map>.spots.json`). Unauthenticated:
+  anyone on the LAN can do all three.
 
 ## CAN bus (Teensy 4.1, current)
 

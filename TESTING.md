@@ -384,3 +384,74 @@ drive directions, and the robot visibly tracks straight — lateral drift under
 ~10 cm over 3 m. If it still veers with angular.z ≈ 0, the residual is
 mechanical (wheel diameter mismatch / slip) — measure the wheels, don't retune
 the trim.
+
+## 16. Cart parking spots on the map page
+
+**What changed:** the port-8000 map page can now draw, name, move and delete
+**cart parking spots**, and saves them to `<map>.spots.json` next to the map
+(`linorobot2_navigation/maps/apartment_map_3.spots.json`) so they are
+versioned in git with the map they were drawn on. A spot is the map-frame
+pose the robot ends up at — the robot carries the cart on top, so the cart box
+and the robot footprint are concentric and one pose describes both.
+
+`map_viewer.py` gained a `SpotStore` (atomic JSON writes, same pattern as
+`pose_keeper.py`), `GET /spots.json`, `POST /spots/{add,update,delete,cart}`,
+and a `spots_rev` counter in `/meta.json` so the 2 Hz poll only re-fetches the
+list when it actually changed. `robot.launch.py` passes `--spots` via the new
+`map_viewer_spots` argument.
+
+**The page still never commands the robot** — a spot's "goal command" button
+only prints the `ros2 action send_goal` line for you to paste.
+
+### Off-robot (no ROS, no hardware)
+
+```bash
+python3 -m py_compile linorobot2_bringup/scripts/map_viewer.py \
+                      linorobot2_bringup/launch/robot.launch.py
+```
+
+### On the Jetson
+
+```bash
+cd ~/linorobot2_ws && colcon build --symlink-install && source install/setup.bash
+ros2 launch linorobot2_bringup robot.launch.py slam:=false
+```
+
+Check the startup log line **before** touching the page:
+
+```
+[map_viewer] Parking spots: /home/jetson1/Desktop/linorobot2/linorobot2_navigation/maps/apartment_map_3.spots.json (0 loaded)
+```
+
+That path must be the **Desktop source checkout**, not `~/linorobot2_ws/install/...`
+— the store follows the map yaml's colcon symlink to get there, and if that
+ever stops working the spots land in the install space and never reach git.
+
+Then, in a browser on `http://<robot-ip>:8000`:
+
+1. Press **🚛 add parking spot**, click where the cart sits, then click a point
+   it faces. An amber box with its name appears.
+2. Rename it in the table under the map; press **move** and re-click to
+   reposition it; press **goal command** and confirm a command appears and the
+   robot does **not** move.
+3. Reload the browser — the spot is still there, in the same place.
+4. Restart the launch file — the spot is still there.
+
+```bash
+cd ~/Desktop/linorobot2 && git status --short   # -> linorobot2_navigation/maps/apartment_map_3.spots.json
+cat linorobot2_navigation/maps/apartment_map_3.spots.json
+curl -s http://localhost:8000/spots.json | python3 -m json.tool
+```
+
+**Pass:** the startup log shows the source-tree path; a placed spot survives a
+browser reload *and* a launch restart; `git status` lists the spots file in the
+source checkout; the box is drawn at the coordinates the table reports; the
+existing **📍 set robot pose** flow still works and the two modes cancel each
+other rather than both being armed; nothing publishes to `/cmd_vel` or
+`/navigate_to_pose` at any point (`ros2 topic echo /cmd_vel` stays silent while
+you place spots).
+
+**If the amber boxes are in obviously wrong places**, the map was re-SLAMmed
+under them: spots are map coordinates, not features, so a new map means
+re-placing them. The page prints a warning when the spots file names a
+different map than the one it was loaded for.

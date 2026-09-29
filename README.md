@@ -183,6 +183,10 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: 
 The command streams feedback and returns on arrival; a new goal preempts the
 old one. Hard stop: `Ctrl-C` the goal, or run teleop and hit space.
 
+For places you go back to — where a cart is parked or picked up — save a
+**parking spot** instead of re-finding the coordinates by eye; see
+[Cart parking spots](#cart-parking-spots).
+
 **Testing obstacle avoidance** (✅ passed 2026-07-19): send a goal across a few
 meters of open floor, then place a box in the robot's path while it drives.
 The box appears in the local costmap within ~0.5 s; the robot brakes if it is
@@ -315,7 +319,8 @@ the viewing machine.
 
 ```bash
 # On the robot (Terminal 4):
-python3 ~/Desktop/linorobot2/linorobot2_bringup/scripts/map_viewer.py
+python3 ~/Desktop/linorobot2/linorobot2_bringup/scripts/map_viewer.py \
+  --spots ~/Desktop/linorobot2/linorobot2_navigation/maps/apartment_map_3.spots.json
 
 # From your laptop, either browse directly (same LAN):
 #   http://<robot-ip>:8000
@@ -323,6 +328,43 @@ python3 ~/Desktop/linorobot2/linorobot2_bringup/scripts/map_viewer.py
 ssh -L 8000:localhost:8000 <user>@<robot-ip>
 #   then open http://localhost:8000
 ```
+
+### Cart parking spots
+
+This robot drives **under** a cart and carries it on top, so where a cart
+belongs is just a pose the robot drives to. The map page lets you draw those
+poses instead of re-deriving coordinates every time.
+
+Press **🚛 add parking spot**, click where the cart sits, then click a point it
+faces — the same two-click idiom as **📍 set robot pose**. An amber box the size
+of a cart appears, and a table under the map lets you rename it, **move** it
+(re-click a new position), delete it, or print its `ros2 action send_goal`
+command.
+
+Spots are saved to `linorobot2_navigation/maps/<map>.spots.json`, next to the
+map they were drawn on, so they get committed to git and travel with the map.
+`robot.launch.py` points the viewer at the map named by `map_viewer_spots`
+(default `apartment_map_3` — keep it in sync with `MAP_NAME` in
+`navigation.launch.py`):
+
+```bash
+ros2 launch linorobot2_bringup robot.launch.py \
+  map_viewer_spots:=$HOME/Desktop/linorobot2/linorobot2_navigation/maps/my_map.spots.json
+```
+
+Two things to know:
+
+- **The page never drives the robot.** "goal command" copies a command out; you
+  still run it yourself. Placing spots is safe with the robot powered and on the
+  floor.
+- **Spots are map coordinates, not features.** Re-SLAMming the area moves the
+  origin under them, and they have to be re-placed. The page warns when the
+  spots file was saved for a different map.
+- A spot closer than the costmap inflation radius (~0.4 m, see
+  `linorobot2_navigation/config/navigation.yaml`) to a wall will be refused or
+  shifted by the planner, and plain `NavigateToPose` parks to a 0.35 m / 0.35 rad
+  tolerance with `rotate_to_goal_heading: false` — good enough to reach a bay,
+  not to align a cart precisely.
 
 If you'd rather use RViz on your **laptop** (both machines on the same LAN and
 same `ROS_DOMAIN_ID`, default `0`; `/map` and `/scan` are discovered over DDS):
