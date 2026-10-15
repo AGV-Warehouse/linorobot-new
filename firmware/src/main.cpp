@@ -1,5 +1,5 @@
-// linorobot2-compatible base firmware for Teensy 4.1
-//   2x CubeMars AK10-9 (MIT mode over CAN2) + optional MPU6050 + micro-ROS.
+// linorobot2-compatible base firmware for Teensy 4.1 or Nucleo-H753ZI
+//   2x CubeMars AK10-9 (MIT mode over CAN) + optional MPU6050 + micro-ROS.
 //
 // Talks to the robot computer over USB serial via micro-ROS. The agent is
 // launched by linorobot2_bringup:
@@ -244,13 +244,11 @@ void publishData()
     motor_current_data[1] = right_motor.getCurrentAmps();
     motor_current_data[2] = (float)ak10_rx_total;
     motor_current_data[3] = (float)ak10_rx_last_id;
-    // FLEXCAN2 ECR register: low byte = TX error counter, next = RX error
-    // counter. TEC pegged at/above 128 (error-passive) means our transmissions
-    // are never ACKed -- i.e. the TX line to the bus is physically dead.
     {
-        uint32_t ecr = *(volatile uint32_t *)0x401D401C;
-        motor_current_data[4] = (float)(ecr & 0xFF);         // TX error count
-        motor_current_data[5] = (float)((ecr >> 8) & 0xFF);  // RX error count
+        uint8_t tec, rec;
+        ak10CanErrors(tec, rec);
+        motor_current_data[4] = (float)tec; // TX error count
+        motor_current_data[5] = (float)rec; // RX error count
     }
     RCSOFTCHECK(rcl_publish(&motor_current_publisher, &motor_current_msg, NULL));
 }
@@ -320,7 +318,9 @@ void destroyEntities()
 
 void setup()
 {
-    Serial.begin(921600); // USB CDC: baud is nominal, must just match the agent
+    // Teensy: USB CDC, baud is nominal. Nucleo: USART3 -> ST-LINK virtual COM
+    // port, a real UART, so this must equal the agent's --baudrate.
+    Serial.begin(921600);
     set_microros_serial_transports(Serial);
 
     ak10Begin();

@@ -4,7 +4,7 @@ on:
     # any branch: firmware breakage should surface before a PR exists
     paths: [ 'firmware/**', '.github/workflows/firmware.yml' ]
   pull_request:
-    branches: [ jazzy ]
+    branches: [ main ]
     paths: [ 'firmware/**', '.github/workflows/firmware.yml' ]
 jobs:
   # Fast, dependency-free check: compiles the real motor driver + config
@@ -20,7 +20,7 @@ jobs:
           g++ -std=c++14 -Wall -Wextra -Werror -Istub -I../include sim_boot.cpp -o sim_boot
           ./sim_boot
 
-  # Full Teensy 4.1 firmware build (micro-ROS lib is fetched and built by
+  # Full firmware builds for both MCU boards (micro-ROS lib is fetched and built by
   # PlatformIO, so the first run is slow; the pio cache keeps reruns fast).
   pio-build:
     runs-on: ubuntu-24.04
@@ -54,4 +54,4 @@ jobs:
 
       - name: Build firmware
         working-directory: firmware
-        run: pio run -e teensy41
+        run: pio run -e teensy41 -e nucleo_h753zi

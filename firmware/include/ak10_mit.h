@@ -2,7 +2,8 @@
 #define AK10_MIT_H
 
 // CubeMars AK10-9 driver, MIT mode over CAN (Teensy 4.1 CAN2 = pin 0 CRX2 /
-// pin 1 CTX2). The command packing is identical to the known-good bench-test
+// pin 1 CTX2, or Nucleo-H753ZI FDCAN1 = PD0 RX / PD1 TX, see fdcan_h7.h).
+// The command packing is identical to the known-good bench-test
 // sketch (teensy41_can1_can3_test.ino); this file adds feedback decoding so the
 // measured wheel velocity can be turned into odometry for SLAM.
 //
@@ -14,11 +15,16 @@
 // velocity maps 1:1 to v_des and to the decoded feedback velocity.
 
 #include <Arduino.h>
-#include <FlexCAN_T4.h>
 #include "config.h"
 
+#ifdef ARDUINO_ARCH_STM32
+#include "fdcan_h7.h"
+static FdcanH7 ak10_can;
+#else
+#include <FlexCAN_T4.h>
 // CAN2 on Teensy 4.1 (pins 0/1), matching the bench-test sketch.
 static FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> ak10_can;
+#endif
 
 inline uint32_t ak10_float_to_uint(float x, float x_min, float x_max, uint8_t bits)
 {
@@ -154,10 +160,30 @@ private:
 
 inline void ak10Begin()
 {
+#ifdef ARDUINO_ARCH_STM32
+    ak10_can.begin(); // 1 Mbps is fixed by the bit timing in fdcan_h7.h
+#else
     ak10_can.begin();
     ak10_can.setBaudRate(CAN_BITRATE);
     ak10_can.setMaxMB(16);
     ak10_can.enableFIFO();
+#endif
+}
+
+// TX / RX error counters for the /motor_current link-health diagnostics.
+// TEC pegged at/above 128 (error-passive) means our transmissions are never
+// ACKed -- i.e. the TX line to the bus is physically dead.
+inline void ak10CanErrors(uint8_t &tec, uint8_t &rec)
+{
+#ifdef ARDUINO_ARCH_STM32
+    uint32_t ecr = FDCAN1->ECR; // TEC [7:0], REC [14:8]
+    tec = ecr & FDCAN_ECR_TEC_Msk;
+    rec = (ecr & FDCAN_ECR_REC_Msk) >> FDCAN_ECR_REC_Pos;
+#else
+    uint32_t ecr = *(volatile uint32_t *)0x401D401C; // FLEXCAN2 ECR
+    tec = ecr & 0xFF;
+    rec = (ecr >> 8) & 0xFF;
+#endif
 }
 
 // Send the MIT "enter motor mode" command (FF..FC). Required after motor

@@ -1,8 +1,9 @@
 # linorobot2 — Wesley's robot (project instructions)
 
 This is a heavily customized fork of linorobot2 (ROS 2 **Jazzy**) running a
-real 2WD differential-drive robot. Sessions on this machine run **on the
-robot's Jetson itself** — commands here can physically move the robot.
+real 2WD differential-drive robot. If `/opt/ros/jazzy` exists, this checkout
+is **on the robot's Jetson** and commands here can physically move the robot.
+Without it (e.g. the Mac copy in `~/Desktop/agv`) nothing can move.
 
 Primary work: hardware bring-up (firmware, CAN, motors), odometry/SLAM
 quality, and Nav2 autonomous-driving tuning. The upstream simulation/docs
@@ -30,16 +31,18 @@ content (`docs/`, `linorobot2_gazebo/`) is mostly untouched reference.
   ```bash
   cd ~/linorobot2_ws && colcon build --symlink-install && source install/setup.bash
   ```
-- Firmware (PlatformIO, from `firmware/`): `pio run -e teensy41 -t upload`.
-  First upload often fails with `error writing to Teensy` — retry once and
-  ALWAYS confirm `[SUCCESS]` (a failed flash strands the Teensy in its
+- Firmware (PlatformIO, from `firmware/`), one env per MCU board:
+  `pio run -e nucleo_h753zi -t upload` (Nucleo-H753ZI over its ST-LINK, the
+  board replacing the Teensy) or `pio run -e teensy41 -t upload`.
+  Teensy: the first upload often fails with `error writing to Teensy` — retry
+  once and ALWAYS confirm `[SUCCESS]` (a failed flash strands the Teensy in its
   bootloader and kills the robot until a good flash).
 - Firmware logic changes (`ak10_mit.h`, `config.h`, boot/stall paths in
   `main.cpp`) must pass the host sim before flashing:
   ```bash
   cd firmware/host_sim && g++ -std=c++14 -Wall -Wextra -Istub -I../include sim_boot.cpp -o sim_boot && ./sim_boot
   ```
-- CI (`.github/workflows/firmware.yml`) builds host sim + Teensy firmware on
+- CI (`.github/workflows/firmware.yml`) builds host sim + both firmware envs on
   any push touching `firmware/`.
 
 ## Safety rules (physical robot)
@@ -76,7 +79,7 @@ content (`docs/`, `linorobot2_gazebo/`) is mostly untouched reference.
 
 ## Conventions
 
-- Work lands on `claude/*` branches; PRs target `jazzy`. The Jetson has
+- Work lands on `claude/*` branches; PRs target `main`. The Jetson has
   limited CPU — treat planner/controller rates and extra nodes (e.g. rf2o)
   as costs, not free.
 - Every behavior change gets a TESTING.md section (what changed, pass

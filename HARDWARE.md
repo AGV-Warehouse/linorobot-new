@@ -10,8 +10,7 @@ Update this file whenever wiring or hardware changes.
 | Part | Detail |
 |------|--------|
 | Compute | NVIDIA Jetson (this machine, Ubuntu / Linux tegra) |
-| MCU (current) | **Teensy 4.1**, micro-ROS over USB serial |
-| MCU (migration branch) | Nucleo-H753ZI (`claude/teensy-nucleo-migration-b9g26c`), FDCAN — see below |
+| MCU | **Nucleo-H753ZI** (replacing the Teensy 4.1, 2026-10). Same `firmware/`, one PlatformIO env per board: `nucleo_h753zi` / `teensy41` |
 | Motors | 2× CubeMars **AK10-9**, MIT mode over CAN @ 1 Mbps |
 | Lidar | RPLIDAR on `/dev/ttyUSB0`, full 360° minus battery-box mask |
 | IMU | MPU6050 (I2C on the MCU) |
@@ -20,12 +19,15 @@ Update this file whenever wiring or hardware changes.
 
 - `/dev/ttyACM0` — MCU micro-ROS serial, **baud 921600** (set in
   `firmware/src/main.cpp`). Exactly one micro-ROS agent may hold it.
+  Teensy: USB CDC (baud nominal). Nucleo: USART3 (PD8/PD9) → the ST-LINK
+  virtual COM port on CN1 — a real UART, so firmware and agent baud must
+  match. The port survives MCU resets and flashes.
 - `/dev/ttyUSB0` — RPLIDAR.
 - Port **8000** — live map web page served by `robot.launch.py`
   (`http://<robot-ip>:8000`, or `ssh -L 8000:localhost:8000`). Used to set
   the AMCL initial pose and click nav goals.
 
-## CAN bus (Teensy 4.1, current)
+## CAN bus (Teensy 4.1)
 
 - CAN2: Teensy pin 0 = CRX2, pin 1 = CTX2 → 3.3 V transceiver
   (SN65HVD230 / TJA1051T/3) → motors, 1 Mbps.
@@ -37,19 +39,36 @@ Update this file whenever wiring or hardware changes.
 - Link health is exposed live on `/motor_current`
   (see TROUBLESHOOTING.md → "CAN link health").
 
-## CAN bus (Nucleo-H753ZI, migration branch)
+## CAN bus (Nucleo-H753ZI)
 
-Correct wiring per UM2407 Table 20 — straight-through, never crossed:
+FDCAN1, wiring per UM2407 Table 20 — straight-through, never crossed:
 
-- transceiver RXD → **PD0** = CN9 pin 25 (D67)
-- transceiver TXD → **PD1** = CN9 pin 27 (D66)
-- CN9 odd-row end order: PF0(23), PD0(25), PD1(27), PG0(29)
+| Transceiver | Nucleo | Header |
+|---|---|---|
+| RXD / CRX | **PD0** (D67, CAN_RX) | CN9 pin 25 |
+| TXD / CTX | **PD1** (D66, CAN_TX) | CN9 pin 27 |
+| VCC (SN65HVD230) | +3V3 | CN8 pin 7 |
+| VCC / VIO (TJA1051T/3) | +5V / +3V3 | CN8 pin 9 / CN8 pin 7 |
+| GND, RS/S mode pin | GND | CN8 pin 11 or 13 |
 
-Verified good on this board: HSE bypass 8 MHz clock config, FDCAN NBTP=0x500
-(exact 1 Mbps), PD0/PD1 in AF9 push-pull. Firmware never recovers from
-bus-off (INIT stays latched) — **always reset the board after fixing CAN
-hardware**. Live-debug register recipes (openocd + ST-LINK, FDCAN TEST
-register, listen-only pokes) are in TROUBLESHOOTING.md → "Nucleo FDCAN".
+- CN9 odd column, bottom end: PF0 (21), **GND (23)**, PD0 (25), PD1 (27),
+  PG0 (29, last pin). Pin 23 is the meter landmark: it beeps to GND, and the
+  next two pins are RX then TX. (An earlier version of this file said pin 23
+  was PF0 — wrong; the CAN pins were right.)
+- Same transceiver rules as the Teensy (mode pin low, 3.3 V logic); CANH/CANL
+  and termination unchanged (≈ 60 Ω across CANH–CANL, powered off).
+- Firmware: `firmware/include/fdcan_h7.h`. Kernel clock = HSE 8 MHz (ST-LINK
+  MCO, bypass), NBTP = 0x500 (exact 1 Mbps, 87.5 % sample point), PD0/PD1 AF9
+  push-pull — the values verified on this board during the first bring-up.
+- Bus-off: the M_CAN latches CCCR.INIT and never leaves it by itself. The
+  firmware clears it on its next CAN poll (FlexCAN on the Teensy did this
+  automatically), so a fixed CAN fault recovers without a reset.
+- Live-debug register recipes (openocd + ST-LINK, FDCAN TEST register,
+  listen-only pokes) are in TROUBLESHOOTING.md → "Nucleo FDCAN".
+- MPU6050 (optional): SDA = PB9 (CN7 pin 4), SCL = PB8 (CN7 pin 2), 3.3 V.
+- History: the first Nucleo port lived on `claude/teensy-nucleo-migration-b9g26c`,
+  which was never pushed and is gone. The current port was redone from `main`
+  in 2026-10.
 
 ## Motors / firmware behavior
 
@@ -85,5 +104,11 @@ register, listen-only pokes) are in TROUBLESHOOTING.md → "Nucleo FDCAN".
   the Teensy may be stranded in its bootloader (no `/dev/ttyACM0`).
 - Flashing makes the USB device vanish, which **kills the micro-ROS agent
   and it does not respawn** — restart `robot.launch.py` after a flash.
-- Nucleo: ST-LINK; `reset run` via openocd reboots firmware and the agent
-  reconnects in ~2 s.
+- Nucleo: `cd firmware && pio run -e nucleo_h753zi -t upload` over the
+  ST-LINK USB (CN1). The virtual COM port stays up, so the agent reconnects
+  in ~2 s on its own. `reset run` via openocd (or the black B2 button)
+  reboots the firmware. Needs PlatformIO's udev rules for the ST-LINK
+  (firmware/README.md). Fallback: copy `.pio/build/nucleo_h753zi/firmware.bin`
+  onto the `NOD_H753ZI` USB drive.
+- Either board: the MCU stops sending CAN while it flashes, and the motors
+  keep executing their last MIT command — flash with the robot stopped.

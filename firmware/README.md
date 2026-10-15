@@ -1,4 +1,8 @@
-# linorobot2 Teensy firmware — AK10-9 (MIT mode)
+# linorobot2 base firmware — AK10-9 (MIT mode)
+
+Builds for a **Teensy 4.1** (`-e teensy41`) or a **Nucleo-H753ZI**
+(`-e nucleo_h753zi`, see "Nucleo-H753ZI" below). Everything except the CAN
+driver and serial port is shared.
 
 micro-ROS firmware that turns a **Teensy 4.1** into a linorobot2 base
 controller for two **CubeMars AK10-9** motors driven in **MIT mode over CAN2**,
@@ -89,6 +93,37 @@ Notes:
   teensy41 -t clean_microros` before rebuilding, or the micro-ROS CMake cache
   keeps the old flags.
 - On flash the Teensy reboots into the firmware and appears as `/dev/ttyACM0`.
+
+## Nucleo-H753ZI
+
+Same code; `include/fdcan_h7.h` replaces FlexCAN with FDCAN1 on PD0/PD1.
+Wiring: HARDWARE.md → "CAN bus (Nucleo-H753ZI)".
+
+One time on the Jetson, install PlatformIO's udev rules so the ST-LINK can be
+flashed without sudo (they also stop ModemManager grabbing `/dev/ttyACM0`),
+then replug the board:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules \
+  | sudo tee /etc/udev/rules.d/99-platformio-udev.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Build and flash with the Nucleo's ST-LINK USB (CN1) plugged into the Jetson:
+
+```bash
+cd firmware
+~/.platformio/penv/bin/pio run -e nucleo_h753zi -t upload
+```
+
+Pass: `** Verified OK **` and `[SUCCESS]`.
+
+- micro-ROS runs over USART3 → the ST-LINK virtual COM port, which shows up
+  as `/dev/ttyACM0` just like the Teensy. It is a real UART, so the 921600 in
+  `Serial.begin()` must equal the agent's `--baudrate`.
+- The port survives a flash, so the agent reconnects by itself ~2 s later.
+- Status LED = LD1 (green).
+- After changing `build_flags`: `pio run -e nucleo_h753zi -t clean_microros`.
 
 ## Run it with linorobot2
 

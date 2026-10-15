@@ -1,7 +1,8 @@
 #ifndef IMU_MPU6050_H
 #define IMU_MPU6050_H
 
-// MPU6050 over I2C (Teensy 4.1: SDA = pin 18, SCL = pin 19, 3.3V).
+// MPU6050 over I2C, 3.3V. Teensy 4.1: SDA = pin 18, SCL = pin 19.
+// Nucleo-H753ZI: SDA = PB9 (CN7 pin 4, D14), SCL = PB8 (CN7 pin 2, D15).
 // Publishes raw accel/gyro; orientation is left to the EKF / madgwick filter
 // on the robot computer, so orientation_covariance[0] = -1 marks it as not
 // provided. The IMU is OPTIONAL: if none is connected, ok() returns false and

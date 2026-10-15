@@ -83,7 +83,7 @@ sending a goal; per-stage message counts pinpoint the zeroing layer.
 - The Jetson CPU is the budget: rf2o alone burns ~50% of a core; planner
   and controller rates in `navigation.yaml` were lowered deliberately.
 
-## Nucleo FDCAN bring-up (migration branch)
+## Nucleo FDCAN bring-up
 
 Wiring truth in HARDWARE.md. Debug techniques proven on this board
 (PlatformIO-bundled openocd + ST-LINK, works while firmware runs):
@@ -112,5 +112,7 @@ Wiring truth in HARDWARE.md. Debug techniques proven on this board
   No-ACK gives LEC=3 and caps at TEC 128 (error passive), never bus-off.
 - **Bit-rate downshift** (NBTP NBRP=7 → 125 kbps): if Bit0 persists at
   125 k, rule out slew/loop-delay entirely.
-- Firmware never exits bus-off — reset the board after any CAN hardware fix.
+- Bus-off: the firmware clears CCCR.INIT on its next CAN poll, so the link
+  recovers on its own once the fault is fixed. If `/motor_current` `[4]`
+  keeps climbing back to bus-off, the TX path is still broken.
 - Serial symptoms that mimic all of this: stacked agents (section 1).

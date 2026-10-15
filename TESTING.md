@@ -384,3 +384,53 @@ drive directions, and the robot visibly tracks straight — lateral drift under
 ~10 cm over 3 m. If it still veers with angular.z ≈ 0, the residual is
 mechanical (wheel diameter mismatch / slip) — measure the wheels, don't retune
 the trim.
+
+## 16. Nucleo-H753ZI base controller (replaces the Teensy)
+
+**What changed (2026-10):** the firmware builds for a Nucleo-H753ZI as well as
+the Teensy (`-e nucleo_h753zi`). `include/fdcan_h7.h` drives FDCAN1 on PD0/PD1
+at 1 Mbps with the bit timing verified on this board; micro-ROS runs over the
+ST-LINK virtual COM port at 921600. Motor logic, `config.h` constants and
+topics are unchanged. New on the Nucleo: a bus-off is cleared on the next CAN
+poll (the Teensy's FlexCAN already did this). Wiring: HARDWARE.md → "CAN bus
+(Nucleo-H753ZI)". The first port (`claude/teensy-nucleo-migration-b9g26c`)
+was never pushed; this is a fresh port from `main`.
+
+Do these in order. Don't move on until each passes.
+
+1. **Host sim** (section 2). Pass: `ALL SCENARIOS PASS`.
+2. **Build:** `cd firmware && ~/.platformio/penv/bin/pio run -e nucleo_h753zi`.
+   Pass: `[SUCCESS]`. The first build compiles micro-ROS and is slow.
+3. **Wiring, everything unpowered:** meter in continuity mode. Pass: CN9 pin 23
+   beeps to GND; CN9-25 beeps to the transceiver RXD and CN9-27 to TXD;
+   transceiver RS/S beeps to GND; about 60 Ω across CANH–CANL.
+4. **Flash, motor battery OFF, wheels up:**
+   ```bash
+   pkill -f micro_ros_agent    # or stop robot.launch.py
+   cd firmware && ~/.platformio/penv/bin/pio run -e nucleo_h753zi -t upload
+   ```
+   Pass: `** Verified OK **` and `[SUCCESS]`.
+5. **micro-ROS link:** start `robot.launch.py` (it starts the one agent).
+   Pass: LD1 green on within ~5 s, and
+   `ros2 topic hz /odom/unfiltered` reads about 50 Hz.
+6. **CAN link, wheels still up:** motor battery ON, then press the Nucleo's
+   black reset button (B2). Pass: one small enable twitch per motor then a held
+   brake (section 1), and in
+   `ros2 topic echo /motor_current --once --field data`, `[4]` = `[5]` = 0 with
+   `[2]` higher on each read. `[4]` climbing with `[5]` = 0 → TX path (CN9-27
+   wire, mode pin), see TROUBLESHOOTING.md → "CAN link health".
+7. **Wheels-up drive** with `teleop_keyboard.py`. Pass: forward drives both
+   wheels in the forward direction and `/odom/unfiltered` `twist.linear.x` is
+   positive; turning works both ways; releasing the key stops the wheels within
+   about 0.4 s (`CMD_VEL_TIMEOUT_MS`).
+8. **Bus-off recovery, wheels up, zero command:** pull the CN9-27 (TX) wire
+   for ~5 s, then plug it back in. Pass: `[4]` climbs while it's out, falls
+   back to 0 within a few seconds after, and teleop drives again **without a
+   reset**.
+9. **Serial soak:** leave it connected for 10 minutes. Pass: `/odom/unfiltered`
+   holds about 50 Hz and the launch log shows no agent reconnects. If it
+   flaps, drop to 460800 on both sides (`Serial.begin()` in `main.cpp` and the
+   `micro_ros_baudrate` launch argument) and retest.
+10. **Tape test** (section 4), once. Pass: within ±0.05 m with
+    `ERPM_TO_WHEEL_RADPS` unchanged. The constant is motor-side; if it needs
+    changing, something else moved.
