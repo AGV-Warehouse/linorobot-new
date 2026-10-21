@@ -46,6 +46,11 @@ slam_toolbox:
     use_scan_barycenter: true
     minimum_travel_distance: 0.1
     minimum_travel_heading: 0.1
+    # Without this, slam_toolbox's own scan gate checks DISTANCE ONLY (needs
+    # >= 0.8 * minimum_travel_distance) and ignores heading, so a spin in place
+    # never adds a scan and the map/pose freeze. true = accept a scan when
+    # EITHER distance >= minimum_travel_distance OR heading >= minimum_travel_heading.
+    check_min_dist_and_heading_precisely: true
     scan_buffer_size: 10
     scan_buffer_maximum_scan_distance: 10.0
     link_match_minimum_response_fine: 0.1  

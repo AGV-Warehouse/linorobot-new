@@ -434,3 +434,49 @@ Do these in order. Don't move on until each passes.
 10. **Tape test** (section 4), once. Pass: within ±0.05 m with
     `ERPM_TO_WHEEL_RADPS` unchanged. The constant is motor-side; if it needs
     changing, something else moved.
+
+## 17. mpu6050_imu driver (Jetson I2C bus 7)
+
+`robot.launch.py` includes `mpu6050_imu/launch/imu.launch.py`, but the package
+was never in this repo. `mpu6050_imu/` is a from-scratch replacement: reads the
+MPU6050 at 0x68 on `/dev/i2c-7` directly (no smbus dependency), publishes
+`sensor_msgs/Imu` on `imu/data` at 100 Hz in `imu_link`, reliable QoS. No
+orientation (`orientation_covariance[0] = -1`) and no TF; the EKF fuses only
+`angular_velocity.z`. Gyro bias is measured over the first 2 s — **keep the
+robot still while it starts**; motion is detected and logged as a WARN.
+`imu_logger` from the old package is not reimplemented.
+
+```bash
+ros2 launch mpu6050_imu imu.launch.py i2c_bus:=7 i2c_addr:=104
+# log: "Gyro bias [...] dps ... (noise std <0.5 dps)" with no motion WARN
+ros2 topic hz /imu/data                          # ~100 Hz
+ros2 topic echo /imu/data --once                 # linear_acceleration.z ~ +9.8
+```
+
+Pass criteria (measured 2026-10-15, robot at rest): 100.0 Hz, accel z
+9.77 m/s², gyro z mean +0.004 dps, std 0.087 dps. Sign check: rotating left
+(teleop `j`, CCW from above) must give **positive** `angular_velocity.z`,
+matching `odom/unfiltered` `twist.angular.z`.
+
+Note: the Nucleo firmware also advertises `/imu/data` (publisher count 2) but
+publishes nothing unless an MPU6050 is wired to the MCU — harmless.
+
+## 18. SLAM updates while spinning in place
+
+`slam.yaml`: `check_min_dist_and_heading_precisely: true`. slam_toolbox's
+scan gate (`shouldProcessScan`, 2.8.x) otherwise rejects every scan until the
+robot has moved >= 0.8 * `minimum_travel_distance` and ignores heading, so a
+pure in-place rotation never adds a scan: `/pose` and the map page arrow freeze
+and the map doesn't change. Odometry was verified correct during the spin
+(2026-10-21: imu / wheel / EKF / rf2o yaw rates all agree, ~±1.0 rad/s), so
+this was purely the gate.
+
+```bash
+ros2 param get /slam_toolbox check_min_dist_and_heading_precisely   # True
+ros2 topic hz /pose     # spin in place with teleop j/l: ~5 Hz (one per 0.1 rad
+                        # at 1 rad/s, capped by minimum_time_interval 0.2 s);
+                        # 0 Hz before the fix
+```
+
+Pass: while spinning in place, `/pose` publishes and the robot arrow on
+`http://<robot-ip>:8000` rotates with the robot; stationary, `/pose` is silent.
