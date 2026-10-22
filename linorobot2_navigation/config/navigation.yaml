@@ -118,8 +118,11 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.35
-      yaw_goal_tolerance: 0.35
+      # Was 0.35 m / 0.35 rad (~20 deg): the robot visibly stopped short of the
+      # goal marker. 0.10 m is just above AMCL's ~0.09 m position sigma (tighter
+      # risks creeping back and forth at the 0.05 m/s cap); 0.15 rad ~ 9 deg.
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.15
     # RotationShim rotates in place toward the path heading first (safe with the
     # front-only lidar), then hands off to RegulatedPurePursuit -- the proven
     # controller from the jazzy branch. MPPI was tried here and never produced

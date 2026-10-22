@@ -511,3 +511,19 @@ now rewrites that param to this package's `share/config/` path via
 ros2 lifecycle get /bt_navigator          # active [3]
 # container log must NOT contain "Couldn't open input XML file"
 ```
+
+## 21. Tighter goal tolerance (0.10 m / 0.15 rad)
+
+`navigation.yaml` `general_goal_checker`: 0.35 m / 0.35 rad -> 0.10 m /
+0.15 rad. The robot visibly stopped short of goals although AMCL was well
+localized (2026-10-22: 82% of scan points within 5 cm of map walls at the
+AMCL pose, sigma ~0.09 m / 5 deg). Live-settable without restart:
+
+```bash
+ros2 param set /controller_server general_goal_checker.xy_goal_tolerance 0.10
+ros2 param set /controller_server general_goal_checker.yaw_goal_tolerance 0.15
+```
+
+Pass: on arrival, the robot is within ~10 cm / ~9 deg of the goal marker and
+the goal returns SUCCEEDED without back-and-forth creeping. If it creeps or
+the goal times out near the end, relax xy to 0.15.
