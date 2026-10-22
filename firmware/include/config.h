@@ -5,7 +5,12 @@
 // Robot geometry -- measured on the real robot (chassis is 550mm x 550mm).
 // ---------------------------------------------------------------------------
 #define WHEEL_DIAMETER       0.120     // meters, measured
-#define LR_WHEELS_DISTANCE   0.37921   // meters, center-to-center, measured
+// Effective track, calibrated 2026-10-22 (TESTING.md §19): tape-measured
+// center-to-center is 0.37921 m, but with it wheel odometry over-reported
+// in-place rotation by 4.5% vs SLAM scan matching (893.8 vs 855.4 deg over
+// ~2.4 turns at 0.4 rad/s; IMU agreed with SLAM within 1%). The tire contact
+// patch makes the effective track wider than the measured one.
+#define LR_WHEELS_DISTANCE   0.3963    // meters, effective (see above)
 
 // ---------------------------------------------------------------------------
 // AK10-9 actuators (CubeMars, MIT mode over CAN). Values copied from the

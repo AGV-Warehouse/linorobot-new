@@ -480,3 +480,19 @@ ros2 topic hz /pose     # spin in place with teleop j/l: ~5 Hz (one per 0.1 rad
 
 Pass: while spinning in place, `/pose` publishes and the robot arrow on
 `http://<robot-ip>:8000` rotates with the robot; stationary, `/pose` is silent.
+
+## 19. Wheel turn-rate calibration (effective track width)
+
+`config.h`: `LR_WHEELS_DISTANCE` 0.37921 -> 0.3963 (effective, not the tape
+measurement). With 0.37921, wheel odometry over-reported in-place rotation
+by 4.5% vs SLAM scan matching (and rf2o / IMU), and commanded turns ran
+~4% slow, since the same track is used for cmd_vel -> wheel speeds.
+
+Procedure: record wheel `odom/unfiltered` twist.angular.z, rf2o, and the
+SLAM `map->base_footprint` yaw while spinning in place 2+ turns at
+~0.4 rad/s (teleop `turn:=0.4`), integrate each, and scale the track by
+wheel/SLAM.
+
+Pass criteria (measured 2026-10-22 after flashing, ~6 turns at 0.39 rad/s):
+wheel 2213.0 deg vs SLAM 2221.0 deg (0.996) and rf2o 2214.9 deg. Before:
+802.4 vs 766.5 deg (1.047). Host sim passes.
