@@ -496,3 +496,18 @@ wheel/SLAM.
 Pass criteria (measured 2026-10-22 after flashing, ~6 turns at 0.39 rad/s):
 wheel 2213.0 deg vs SLAM 2221.0 deg (0.996) and rf2o 2214.9 deg. Before:
 802.4 vs 766.5 deg (1.047). Host sim passes.
+
+## 20. Nav2 BT path resolved at launch (no hard-coded home dir)
+
+`navigation.yaml` had `default_nav_to_pose_bt_xml` hard-coded to
+`/home/jetson1/Desktop/linorobot2/...`. On any other machine bt_navigator
+failed to activate ("Couldn't open input XML file"), the lifecycle manager
+aborted bringup (waypoint_follower and docking_server also left inactive), and every
+goal was rejected with "Action server is inactive". `navigation.launch.py`
+now rewrites that param to this package's `share/config/` path via
+`RewrittenYaml`.
+
+```bash
+ros2 lifecycle get /bt_navigator          # active [3]
+# container log must NOT contain "Couldn't open input XML file"
+```

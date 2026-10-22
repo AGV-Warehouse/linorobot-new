@@ -21,6 +21,7 @@ from launch.conditions import IfCondition
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 from launch.conditions import IfCondition
+from nav2_common.launch import RewrittenYaml
 
 
 MAP_NAME='apartment_map_3' #change to the name of your own map here
@@ -40,6 +41,18 @@ def generate_launch_description():
 
     nav2_config_path = PathJoinSubstitution(
         [FindPackageShare('linorobot2_navigation'), 'config', 'navigation.yaml']
+    )
+
+    # bt_navigator needs an ABSOLUTE path to the custom BT; resolve it from the
+    # installed package instead of hard-coding a user's home directory.
+    bt_xml_path = PathJoinSubstitution(
+        [FindPackageShare('linorobot2_navigation'), 'config',
+         'navigate_to_pose_doorway_recovery.xml']
+    )
+    nav2_params = RewrittenYaml(
+        source_file=nav2_config_path,
+        param_rewrites={'default_nav_to_pose_bt_xml': bt_xml_path},
+        convert_types=True,
     )
 
     pose_keeper_path = PathJoinSubstitution(
@@ -93,7 +106,7 @@ def generate_launch_description():
             launch_arguments={
                 'map': LaunchConfiguration("map"),
                 'use_sim_time': LaunchConfiguration("sim"),
-                'params_file': nav2_config_path,
+                'params_file': nav2_params,
             }.items()
         ),
 
