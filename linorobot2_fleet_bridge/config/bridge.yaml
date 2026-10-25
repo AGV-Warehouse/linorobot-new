@@ -1,0 +1,15 @@
+linorobot2_fleet_bridge:
+  ros__parameters:
+    commissioned: false
+    physical_height_m: -1.0  # Measure before factsheet commissioning; no invented height.
+    map_id: map
+    manufacturer: AGVWarehouse
+    serial_number: AGV-01
+    mqtt_broker: tcp://127.0.0.1:1883
+    journal_path: ''
+    sensor_max_age_s: 2.0
+    arrival_tolerance_m: 0.12
+    # Centre clearance after robot footprint and stopping margin, not full aisle width.
+    centre_corridor_half_width: 0.15
+    max_speed: 0.05
+    max_turn: 0.25

@@ -384,3 +384,33 @@ drive directions, and the robot visibly tracks straight — lateral drift under
 ~10 cm over 3 m. If it still veers with angular.z ≈ 0, the residual is
 mechanical (wheel diameter mismatch / slip) — measure the wheels, don't retune
 the trim.
+
+## Fleet bridge integration (2026-10-24)
+
+The new linorobot2_fleet_bridge package is separate from single-robot navigation.
+The launch defaults start_hardware=false and commissioned=false. Existing firmware,
+CAN constants and hardware wiring are unchanged. Do not run hardware movement tests
+without explicit authorization and a controlled test area.
+
+Platform-neutral logic checks (no robot connection):
+
+```bash
+cmake -S linorobot2_fleet_bridge -B /tmp/fleet-core -DFLEET_CORE_ONLY=ON
+cmake --build /tmp/fleet-core -j2
+ctest --test-dir /tmp/fleet-core --output-on-failure
+```
+
+Pass: all order/recovery/state/route tests pass. They cover horizon rejection,
+immutable update IDs, in-flight base extension, old completed order replay,
+unknown/stale sensors and persistent journal behavior. They do not verify Nav2,
+MQTT or traffic scheduling. Linux CI also builds the bridge against Jazzy and
+pinned vda5050_core; inspect the CI result rather than assuming it passed.
+
+Physical acceptance, when separately authorized: verify one micro-ROS agent,
+exactly one /cmd_vel publisher (collision_monitor), controller -> authorization
+gate -> smoother -> monitor wiring; no keyboard teleop or parallel old Nav2 launch.
+Provide actual battery and safety-permission inputs and verify stale inputs revoke
+motion. Confirm actual stop before pause/cancel acknowledgement. Check path
+containment and stopping margin with the real footprint. Import the commissioned
+openTCS model and verify two-car mutual exclusion, Broker reconnect and independent
+robot/Adapter/openTCS restart before operating a fleet.

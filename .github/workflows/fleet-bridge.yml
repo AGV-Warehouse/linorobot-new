@@ -1,0 +1,39 @@
+name: fleet-bridge
+on:
+  push:
+    paths: ['linorobot2_fleet_bridge/**', '.github/workflows/fleet-bridge.yml']
+  pull_request:
+    paths: ['linorobot2_fleet_bridge/**', '.github/workflows/fleet-bridge.yml']
+jobs:
+  execution-logic:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake g++ libsqlite3-dev nlohmann-json3-dev libgtest-dev
+      - run: cmake -S linorobot2_fleet_bridge -B /tmp/fleet-build -DFLEET_CORE_ONLY=ON
+      - run: cmake --build /tmp/fleet-build -j2 && ctest --test-dir /tmp/fleet-build --output-on-failure
+  ros-jazzy:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: ws/src/linorobot2}
+      - name: Install dependencies and pinned protocol library
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y git cmake libsqlite3-dev nlohmann-json3-dev libpaho-mqtt-dev libpaho-mqttpp-dev libfmt-dev python3-colcon-common-extensions ros-jazzy-nav2-msgs ros-jazzy-tf2-ros ros-jazzy-ament-cmake-gtest
+          git clone https://github.com/ros-industrial/vda5050_core /tmp/vda5050_core
+          git -C /tmp/vda5050_core checkout 8c16ee9efa60c0cd4d57e5a1957e20a6bace1668
+          cmake -S /tmp/vda5050_core/vda5050_core -B /tmp/vda-build -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF -DBUILD_PYTHON=OFF -DENABLE_ROS2=OFF -DCMAKE_INSTALL_PREFIX=/opt/vda5050
+          cmake --build /tmp/vda-build -j2 && cmake --install /tmp/vda-build
+      - name: Build and test bridge only
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          export CMAKE_PREFIX_PATH=/opt/vda5050:${CMAKE_PREFIX_PATH:-}
+          cd ws
+          colcon build --packages-select linorobot2_fleet_bridge
+          source install/setup.bash
+          colcon test --packages-select linorobot2_fleet_bridge --event-handlers console_direct+
+          colcon test-result --verbose
