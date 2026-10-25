@@ -1,6 +1,7 @@
 #include "linorobot2_fleet_bridge/vda_actions.hpp"
 #include <stdexcept>
 #include <cmath>
+#include <limits>
 namespace fleet {
 OrderBook::OrderBook(Journal& journal):journal_(journal) {
   if(auto saved=journal_.get("execution")) {
@@ -9,27 +10,39 @@ OrderBook::OrderBook(Journal& journal):journal_(journal) {
     last_message=j.value("lastMessage",order);
     last_node=j.at("lastNodeId"); last_sequence=j.at("lastNodeSequenceId");
     blocked=!order.empty();
+    for(auto& action:actions) if(action.at("actionStatus")=="RUNNING" || action.at("actionStatus")=="WAITING") {
+      action["actionStatus"]="FAILED";action["resultDescription"]="Process restarted; execution outcome uncertain";
+      journal_.put("action:"+action.at("actionId").get<std::string>(),action.dump());
+    }
   }
   // Even previously-idle restarts need local reconciliation before motion.
-  paused=true;
+  paused=true;blocked=true;
+  persist();
 }
 void OrderBook::accept(const Json& incoming,const std::string& map_id) {
   auto fail=[](const std::string& why){throw std::invalid_argument(why);};
+  auto sequence=[](const Json& value)->unsigned {
+    if(!value.is_number_integer() || (!value.is_number_unsigned() && value.get<long long>()<0) ||
+       value.get<std::uint64_t>()>std::numeric_limits<unsigned>::max()) throw std::invalid_argument("Invalid uint32 sequence");
+    return value.get<unsigned>();
+  };
   if(blocked) fail("Restart/failure requires local reconciliation");
   if(!incoming.contains("orderId") || !incoming["orderId"].is_string() || incoming["orderId"].get<std::string>().empty() ||
       !incoming.contains("orderUpdateId") || !incoming["orderUpdateId"].is_number_integer() || incoming["orderUpdateId"].get<long long>()<0) fail("Invalid order identity");
   const std::string id=incoming.at("orderId");
+  if(id.size()>128) fail("Order ID too long");
+  sequence(incoming.at("orderUpdateId"));
   if(journal_.get("cancelled:"+id)) fail("Cancelled order cannot be replayed");
   if(journal_.get("completed:"+id) && (order.empty() || order.at("orderId")!=id))
     fail("Previously completed order cannot be replayed after a different order");
   const auto& nodes=incoming.at("nodes"); const auto& edges=incoming.at("edges");
   if(!nodes.is_array() || nodes.empty() || nodes.size()>100 || !edges.is_array() || edges.size()+1!=nodes.size()) fail("Invalid graph size");
-  if(nodes.front().at("sequenceId").get<unsigned>()%2) fail("Node sequence must be even");
+  if(sequence(nodes.front().at("sequenceId"))%2) fail("Node sequence must be even");
   bool horizon=false;
   for(std::size_t i=0;i<nodes.size();++i) {
     const auto& node=nodes[i]; const auto& pos=node.at("nodePosition");
-    if(node.at("nodeId").get<std::string>().empty()) fail("Empty node ID");
-    if(node.at("sequenceId").get<unsigned>()!=nodes.front().at("sequenceId").get<unsigned>()+2*i) fail("Nonconsecutive sequence");
+    if(node.at("nodeId").get<std::string>().empty() || node.at("nodeId").get<std::string>().size()>128) fail("Invalid node ID");
+    if(sequence(node.at("sequenceId"))!=sequence(nodes.front().at("sequenceId"))+2*i) fail("Nonconsecutive sequence");
     if(!node.value("actions",Json::array()).empty()) fail("Node actions unsupported by this profile");
     if(pos.at("mapId")!=map_id) fail("Wrong map");
     for(const auto* axis:{"x","y"}) if(!std::isfinite(pos.at(axis).get<double>())) fail("Nonfinite position");
@@ -39,11 +52,12 @@ void OrderBook::accept(const Json& incoming,const std::string& map_id) {
     horizon=horizon || !released;
     if(i) {
       const auto& e=edges[i-1];
-      if(e.at("sequenceId").get<unsigned>()!=node.at("sequenceId").get<unsigned>()-1 ||
+      if(e.at("edgeId").get<std::string>().empty() || e.at("edgeId").get<std::string>().size()>128) fail("Invalid edge ID");
+      if(sequence(e.at("sequenceId"))!=sequence(node.at("sequenceId"))-1 ||
          e.at("startNodeId")!=nodes[i-1].at("nodeId") || e.at("endNodeId")!=node.at("nodeId") ||
          e.at("released").get<bool>()!=released) fail("Invalid edge connectivity/release");
       if(e.contains("trajectory") || !e.value("actions",Json::array()).empty() ||
-         e.contains("orientation") || e.contains("direction")) fail("Only straight unconstrained edges supported");
+         e.contains("orientation") || e.contains("direction") || e.contains("rotationDirection")) fail("Only straight unconstrained edges supported");
     }
   }
   if(!nodes.front().at("released").get<bool>()) fail("First node is not released");
@@ -74,7 +88,8 @@ void OrderBook::accept(const Json& incoming,const std::string& map_id) {
   } else {
     if(!order.empty() && index<order.at("nodes").size()) fail("Active order must be cancelled first");
     if(nodes.front().at("sequenceId")!=0) fail("New order must start at sequence zero");
-    order=incoming; index=0; actions=Json::array();
+    // Instant actions have their own lifetime; a new order must not erase a pending pause/cancel.
+    order=incoming; index=0;
   }
   last_message=incoming; persist();
 }

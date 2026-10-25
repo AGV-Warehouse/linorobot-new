@@ -8,6 +8,12 @@ TEST(Recovery, RestartNeverRestoresMotion) {
   OrderBook b(j);EXPECT_TRUE(b.paused);EXPECT_TRUE(b.blocked);b.cancel();EXPECT_FALSE(b.blocked);EXPECT_TRUE(b.paused);EXPECT_TRUE(j.get("cancelled:pending"));
 }
 TEST(Recovery, JournalOverwritesAtomically) {Journal j(":memory:");EXPECT_FALSE(j.get("k"));j.put("k","RUNNING");j.put("k","FINISHED");EXPECT_EQ(j.get("k").value(),"FINISHED");}
+TEST(Recovery, PendingActionBecomesFailedAfterRestartAndIsNotReexecuted) {
+  Journal j(":memory:");
+  j.put("execution",R"({"order":{},"index":0,"actions":[{"actionId":"a1","actionType":"cancelOrder","actionStatus":"RUNNING"}],"lastNodeId":"a","lastNodeSequenceId":0})");
+  OrderBook b(j);EXPECT_TRUE(b.paused);EXPECT_EQ(b.actions[0]["actionStatus"],"FAILED");
+  EXPECT_EQ(Json::parse(j.get("action:a1").value())["actionStatus"],"FAILED");
+}
 TEST(Recovery, RecordsSurviveDatabaseReopen) {
   const auto unique=std::chrono::steady_clock::now().time_since_epoch().count();
   const auto path=std::filesystem::temp_directory_path()/("fleet-journal-"+std::to_string(unique)+".sqlite");

@@ -5,7 +5,7 @@ linorobot2_fleet_bridge:
     map_id: map
     manufacturer: AGVWarehouse
     serial_number: AGV-01
-    mqtt_broker: tcp://127.0.0.1:1883
+    mqtt_broker: ssl://localhost:8883  # Replace hostname with the certificate's DNS name.
     journal_path: ''
     sensor_max_age_s: 2.0
     arrival_tolerance_m: 0.12
@@ -13,3 +13,4 @@ linorobot2_fleet_bridge:
     centre_corridor_half_width: 0.15
     max_speed: 0.05
     max_turn: 0.25
+    navigation_timeout_s: 120.0

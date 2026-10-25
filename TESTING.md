@@ -414,3 +414,43 @@ motion. Confirm actual stop before pause/cancel acknowledgement. Check path
 containment and stopping margin with the real footprint. Import the commissioned
 openTCS model and verify two-car mutual exclusion, Broker reconnect and independent
 robot/Adapter/openTCS restart before operating a fleet.
+# Fleet framework protocol and recovery update (2026-10-25)
+
+Server/UI/robot now live in three independent repositories: Fleetserver, agvapp,
+and linorobot-new. Robot changes are confined to linorobot2_fleet_bridge; no
+firmware calibration constants changed and no physical commands were sent.
+
+Changes: MQTT transport extracted with TLS hostname verification, retained-command
+rejection, 256 KiB ingress limit and 32-message bounded queue. Connection loss,
+overflow and execution timeout latch motion blocked; reconnect never clears the
+latch. Pending actions become FAILED after process restart; cancel cannot clear
+a fault latch. initPosition requires AMCL and TF newer than the request, bounded
+covariance and matching actual position/heading. JSON diagnostic events include
+category, code, robotId, orderId and actionId when applicable.
+
+Startup always latches blocked, including an empty journal. Cancellation targets
+owned Nav2 goal IDs and waits for cancellation replies/late goal replies rather
+than cancelling all goals. Pause/cancel completion requires odometry received
+after the request; a new order cannot erase a pending instant action.
+
+Hardware-isolated checks:
+
+```bash
+cmake -S linorobot2_fleet_bridge -B /tmp/fleet-core -DFLEET_CORE_ONLY=ON
+cmake --build /tmp/fleet-core -j2
+ctest --test-dir /tmp/fleet-core --output-on-failure
+```
+
+Pass criteria: old/fractional/overflow sequences rejected; old matching TF cannot
+confirm a new localization request; new AMCL + new TF with acceptable covariance
+can confirm; restart never authorizes motion or re-executes an unresolved action.
+
+Required Linux/ROS + authorized hardware acceptance (not executed on Windows):
+build the full package with the pinned protocol library, verify MQTT ACL/TLS and
+disconnect/reconnect behavior, drop sensor inputs, request an unconfirmable pause,
+restart during a pending action, and verify output remains zero until local
+reconciliation. Confirm there is only one actuator command path and that its
+controller/base watchdog stops output after process death. Triggering real motion
+requires explicit safe-to-move authorization. An openTCS-only failure with Broker
+alive permits the previously released base to finish; this profile has no master
+heartbeat lease. See Fleetserver/docs/OPERATIONS.zh-CN.md for the recovery matrix.
