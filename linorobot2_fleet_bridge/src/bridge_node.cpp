@@ -101,8 +101,16 @@ BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listen
       robot_.charging=msg->power_supply_status==sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_CHARGING;
     } else robot_.battery.reset();
   });
-  safety_sub_=create_subscription<std_msgs::msg::Bool>("fleet/safety_ok",qos,[this](std_msgs::msg::Bool::ConstSharedPtr msg){
-    robot_.safety_ok=msg->data;robot_.safety_at=RobotState::Clock::now();});
+  safety_sub_=create_subscription<std_msgs::msg::String>("fleet/safety_state",qos,[this](std_msgs::msg::String::ConstSharedPtr msg){
+    try {
+      const auto state=Json::parse(msg->data);
+      const auto stop=state.at("eStop").get<std::string>();
+      if(stop!="NONE" && stop!="AUTOACK" && stop!="MANUAL" && stop!="REMOTE") throw std::invalid_argument("Invalid eStop");
+      robot_.field_violation=state.at("fieldViolation").get<bool>();robot_.e_stop=stop;
+      robot_.safety_ok=stop=="NONE" && !robot_.field_violation;
+      robot_.safety_at=RobotState::Clock::now();
+    } catch(const std::exception&) {robot_.safety_ok=false;robot_.e_stop.clear();}
+  });
   velocity_sub_=create_subscription<geometry_msgs::msg::Twist>("fleet/cmd_vel_requested",10,[this](geometry_msgs::msg::Twist::ConstSharedPtr msg){
     geometry_msgs::msg::Twist out;
     const bool permit=commissioned_ && !book_->paused && !book_->blocked && nav_->executing() && robot_.ready(max_age_);
@@ -286,7 +294,7 @@ void BridgeNode::tick() {
   static unsigned ticks=0;
   if(connected_ && ++ticks%20==0) {
     // VDA 2.0 requires numeric battery/safety fields. Do not publish fabricated healthy values.
-    if(robot_.battery) {if(!online_) connection(true);publish_state();}
+    if(robot_.battery && !robot_.e_stop.empty()) {if(!online_) connection(true);publish_state();}
   }
 }
 void BridgeNode::publish_state() {
@@ -306,7 +314,7 @@ void BridgeNode::publish_state() {
     {"nodeStates",nodes},{"edgeStates",edges},{"driving",!robot_.stopped()}, {"paused",book_->paused},
     {"actionStates",book_->actions},{"batteryState",{{"batteryCharge",*robot_.battery},{"charging",robot_.charging}}},
     {"operatingMode","AUTOMATIC"},{"errors",errors},
-    {"safetyState",{{"eStop",robot_.safety_ok?"NONE":"AUTOACK"},{"fieldViolation",!robot_.safety_ok}}},
+    {"safetyState",{{"eStop",robot_.e_stop},{"fieldViolation",robot_.field_violation}}},
     {"agvPosition",{{"positionInitialized",robot_.localized && robot_.ready(max_age_)},{"x",robot_.pose.x},{"y",robot_.pose.y},{"theta",robot_.pose.yaw},{"mapId",map_}}},
     {"velocity",{{"vx",robot_.vx},{"vy",0},{"omega",robot_.wz}}}};
   try {protocol_->publish(state.get<vt::State>(),0);}catch(const std::exception& e){RCLCPP_ERROR(get_logger(),"State serialization: %s",e.what());}
