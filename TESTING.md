@@ -527,3 +527,20 @@ ros2 param set /controller_server general_goal_checker.yaw_goal_tolerance 0.15
 Pass: on arrival, the robot is within ~10 cm / ~9 deg of the goal marker and
 the goal returns SUCCEEDED without back-and-forth creeping. If it creeps or
 the goal times out near the end, relax xy to 0.15.
+
+## 22. EKF: wheel-only yaw rate (IMU removed from fusion)
+
+`ekf.yaml`: `imu0` commented out. The EKF previously fused only the IMU's
+yaw rate, weighted ~10x over the wheels. Over three in-place spin tests
+the MPU6050 gyro-z scale vs SLAM/rf2o was -2.5% (1 rad/s), -1%, then
+-8.6% (both 0.39 rad/s), with config registers verified (0x1B=0x08
++/-500 dps, 0x1A=0x03). Unstable scale = under-reported turns = doubled
+walls in SLAM maps. Wheel yaw (section 19) matches SLAM within 0.4%.
+
+```bash
+ros2 param get /ekf_filter_node imu0        # parameter not set
+```
+
+Pass: spin in place ~2 turns at 0.4 rad/s; integrated `/odom` yaw rate
+within ~1% of SLAM `map->base_footprint` yaw. A fresh SLAM map shows
+single (not doubled) walls.

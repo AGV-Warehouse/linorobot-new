@@ -21,9 +21,17 @@ ekf_filter_node:
                        false, false, true,
                        false, false, false]
 
-        imu0: imu/data
-        imu0_config: [false, false, false,
-                      false, false, false,
-                      false, false, false,
-                      false, false, true,
-                      false, false, false]
+        # IMU yaw rate DISABLED (2026-11-05, TESTING.md section 22). The MPU6050's
+        # gyro z scale is unstable run to run vs SLAM/rf2o: -1%, -2.5%, then
+        # -8.6% at the same 0.39 rad/s, with its registers verified correct
+        # (+/-500 dps, DLPF 3). The EKF trusted it 10x over the wheels, so turns
+        # were under-reported and SLAM drew doubled walls. Wheel yaw rate
+        # (track calibrated, TESTING.md section 19) matches SLAM within 0.4%. /imu/data
+        # is still published for logging; re-enable here only after the gyro
+        # scale is shown stable.
+        # imu0: imu/data
+        # imu0_config: [false, false, false,
+        #               false, false, false,
+        #               false, false, false,
+        #               false, false, true,
+        #               false, false, false]
