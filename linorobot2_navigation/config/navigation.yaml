@@ -415,7 +415,7 @@ docking_server:
     controller_frequency: 50.0
     initial_perception_timeout: 5.0
     wait_charge_timeout: 5.0
-    dock_approach_timeout: 30.0
+    dock_approach_timeout: 60.0  # crawl speed needs the extra time
     undock_linear_tolerance: 0.05
     undock_angular_tolerance: 0.1
     max_retries: 3
@@ -435,10 +435,16 @@ docking_server:
       use_stall_detection: false # true
 
       external_detection_timeout: 1.0
-      external_detection_translation_x: -0.18
+      # detected_dock_pose comes from cart_leg_detector.py: a planar,
+      # ROS-convention pose at the cart's leg-rectangle center (odom frame).
+      # No frame correction is needed — the -1.57 roll/pitch values from the
+      # upstream example are for AprilTag camera detections and would tip
+      # this pose out of the plane. Keep translations 0 to dock at the
+      # cart center; nudge translation_x only to bias the final stop point.
+      external_detection_translation_x: 0.0
       external_detection_translation_y: 0.0
-      external_detection_rotation_roll: -1.57
-      external_detection_rotation_pitch: -1.57
+      external_detection_rotation_roll: 0.0
+      external_detection_rotation_pitch: 0.0
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
 
@@ -453,15 +459,24 @@ docking_server:
     controller:
       k_phi: 3.0
       k_delta: 2.0
-      v_linear_min: 0.15
-      v_linear_max: 0.15
+      # Crawl speed: the approach threads between the cart legs; 0.15 was
+      # fast enough to clip a leg on attempt #1. Keep this slow.
+      v_linear_min: 0.02
+      v_linear_max: 0.05
+      v_angular_max: 0.3
       use_collision_detection: true
       costmap_topic: "local_costmap/costmap_raw"
       footprint_topic: "local_costmap/published_footprint"
       transform_tolerance: 0.1
       projection_time: 5.0
       simulation_step: 0.1
-      dock_collision_threshold: 0.3
+      # Radius around the dock pose where collisions are FORGIVEN. Driving
+      # under the cart means the "obstacle" (legs, up to ~0.65 m from the
+      # rectangle center) is the destination: 0.3 aborted every entry
+      # ("Collision detected ... Failed to get control"). 0.8 covers the
+      # whole under-cart zone — inside it the human on Ctrl-C is the
+      # collision monitor; outside it detection still protects the approach.
+      dock_collision_threshold: 0.8
 
 loopback_simulator:
   ros__parameters:

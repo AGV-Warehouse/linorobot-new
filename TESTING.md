@@ -574,3 +574,83 @@ with `rosbridge:=false`, `ros2 node list` shows neither
 (`ss -tlnp | grep 9090`). Jetson CPU note: rosbridge is idle-cheap but
 serializing `/map` or high-rate `/scan` subscriptions costs CPU — the web
 app should throttle its subscriptions (see `agvapp/docs/ros-bridge-contract.md`).
+
+## 24. Under-cart docking port: cart_leg_detector + rf2o kill switch
+
+> **Re-validate after the 2026-11 merge onto main.** Everything below was
+> tuned in August on the Teensy with wheel+IMU EKF odometry. Main now runs
+> the Nucleo-H753ZI base, a recalibrated track width (§19) and a
+> **wheel-only** EKF (§22). Before trusting docking on main, re-run:
+> - Phase 2 odometry checks in `UNDER_CART_DOCKING.md` (wheel-only now).
+> - The detector lock and §24b entry-axis check at the practice table.
+> - `dock_preflight.py` PASS/FAIL cases. The "~1 deg/min stationary yaw
+>   drift" note below was measured with IMU fusion; wheel-only odom should
+>   not drift while stationary — confirm.
+> - At least one full dock under the table at the 0.05 m/s crawl, with
+>   `dock_collision_threshold: 0.8` (a hand on Ctrl-C is the only collision
+>   guard inside that radius).
+> - Interaction with the tighter Nav2 goal tolerance (0.10 m / 0.15 rad,
+>   §21) when the staging pose is reached.
+
+**What changed (2026-08-03, ported from the old repo's
+`claude/camera-stack-decision-w8ivuc` branch):** tagless under-cart docking
+groundwork. `linorobot2_navigation/scripts/cart_leg_detector.py` (with
+`config/cart_leg_detector.yaml` and `launch/cart_leg_detector.launch.py`)
+finds the cart's four legs in `/scan_raw` and publishes `detected_dock_pose`
+for the Nav2 docking server (`use_external_detection_pose: true` was already
+set in `navigation.yaml`). `robot.launch.py` gains an `rf2o:=false` argument
+to drop rf2o entirely once the EKF is trusted (this repo's EKF already owned
+the odom TF, so only the kill switch and header rationale were ported), plus
+a header warning that the Teensy firmware can double-publish `imu/data`.
+
+Verification lives in **UNDER_CART_DOCKING.md** — Phase 0 (cart geometry
+gate + scan-quality bags), Phase 1 (detector acceptance: ≥95 % detection
+within 2 m, σ ≤ 1 cm hold jitter, no orientation flips, zero false positives
+with gating), Phase 2 (odometry checks; the EKF-owns-TF regression items were
+already covered by sections 3–4 here).
+
+Quick smoke test after building:
+
+```bash
+ros2 launch linorobot2_navigation cart_leg_detector.launch.py   # standalone
+ros2 launch linorobot2_bringup robot.launch.py rf2o:=false      # kill switch
+```
+
+**Pass:** detector starts and logs its rectangle config, `ros2 node list`
+shows no `rf2o_laser_odometry` when `rf2o:=false`, and
+`odom->base_footprint` is still published (by `ekf_filter_node`).
+
+### 24b. Entry axis aims at the robot (2026-08-04)
+
+**What changed:** attempt #1–2 on the practice table clipped a leg because
+the published yaw was always the rectangle's *long axis* with an arbitrary
+sign — the docking server obediently curved around to enter side-on. Now
+`accept()` considers all four rectangle axes and, on a fresh lock, picks the
+one pointing from the robot (`base_frame`) through the cart center; while
+locked it keeps the previous yaw (no flips mid-entry). Also in
+`navigation.yaml`: approach slowed to a 0.02–0.05 m/s crawl
+(`v_angular_max` 0.3, `dock_approach_timeout` 60 s) and
+`dock_collision_threshold` raised to 0.8 — the legs ARE the destination, at
+0.3 every entry aborted with `Collision detected ... Failed to get control`.
+
+**Test:** park the robot ~1 m out, square-on to a side of the practice
+table, start the detector fresh, `ros2 topic echo /detected_dock_pose --once`.
+
+**Pass:** the pose's yaw points from the robot toward the cart center
+(quaternion ≈ robot's own heading when parked square-on). Repark on a
+different side, restart the detector: yaw follows the robot. During a dock
+approach the yaw must NOT flip (watch the RViz arrow). Docking: one smooth
+straight-in creep, no abort-retry swing, stop within 5 cm of center.
+
+**Preflight gate (use before EVERY dock goal):**
+
+```bash
+python3 linorobot2_navigation/scripts/dock_preflight.py
+```
+
+Checks the live detection + TF geometry (distance, lateral offset from the
+entry line, axis/bearing/heading agreement) and on PASS prints the exact
+`send_goal` command. **Pass:** FAILs with actionable reasons when the robot
+is off the entry line or the lock is bad; PASSes and prints the command when
+parked square-on the entry line at 0.9–2.5 m. Send promptly after a PASS —
+stationary odom yaw drifts ~1 deg/min on this robot.

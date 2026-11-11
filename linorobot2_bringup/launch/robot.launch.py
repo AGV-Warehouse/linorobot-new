@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Single-terminal mapping stack (lidar + IMU SLAM, no wheel encoders).
+# Single-terminal mapping stack (lidar SLAM over wheel-odometry EKF).
 #
 # This is the launch-file version of slam_imu.sh, so the whole mapping stack
 # starts (and stops, on one Ctrl-C) with a single command:
@@ -31,34 +31,46 @@
 # Pipeline:
 #   RPLIDAR A3 --360 deg--> /scan_raw
 #   laser_filter --remove battery box--> /scan   (full 360 minus the battery)
-#   ekf_node (robot_localization) --(odom->base_footprint)--> fuses wheel + IMU
+#   ekf_node (robot_localization) --(odom->base_footprint)--> wheel odom only
 #   rf2o_laser_odometry --> /odom_rf2o              (diagnostic only, no TF)
-#   mpu6050_imu --> /imu/data                       (published, not owning TF)
+#   mpu6050_imu --> /imu/data                       (logged only, not fused)
 #   slam_toolbox --(map->odom)--> builds the map
-#   micro_ros_agent <--serial--> Teensy 4.1         (bridges /cmd_vel to motors)
+#   micro_ros_agent <--serial--> Nucleo-H753ZI      (bridges /cmd_vel to motors;
+#                                   Teensy 4.1 env still builds)
 #   map_viewer.py --> http://<robot-ip>:8000        (live map as a web page)
 #
 # The micro-ROS agent is what lets teleop actually move the robot: teleop_keyboard.py
 # publishes /cmd_vel, the agent forwards it over serial to the Teensy firmware
 # (controlCallback in main.cpp), which drives the AK10-9 motors. The Teensy also
 # publishes real wheel odometry on odom/unfiltered as a TOPIC (not a TF).
-# Set micro_ros:=false if you push the robot by hand instead.
 #
 # ODOMETRY OWNERSHIP (exactly ONE node may publish odom->base_footprint):
-# By default (use_ekf:=true) the robot_localization EKF fuses the Teensy's
-# 50 Hz wheel odometry (odom/unfiltered) with the IMU (imu/data) and owns
+# By default (use_ekf:=true) the robot_localization EKF filters the base
+# controller's 50 Hz wheel odometry (odom/unfiltered) and owns
 # odom->base_footprint, republishing the fused estimate on /odom -- the topic
 # Nav2's bt_navigator and velocity_smoother expect. This replaces the old
 # rf2o-owns-TF setup: rf2o's 10 Hz scan matching on the (then-cropped) FOV
 # was noisy at the 0.05 m/s crawl speed and made autonomous motion jerky (the
 # "no wheel encoders" rationale predates the AK10 velocity feedback decoding).
-# rf2o still runs as an independent cross-check on /odom_rf2o, without TF.
+# rf2o also breaks whenever the lidar view degenerates -- most importantly
+# with cart legs at point-blank range while docking under a cart -- which is
+# exactly when downstream consumers (docking server, slam) need steady
+# odometry. Wheel dead reckoning does not care what the lidar sees.
+# (The IMU yaw rate is NOT fused: its gyro scale was unstable run to run --
+# see linorobot2_base/config/ekf.yaml and TESTING.md section 22.)
+# rf2o still runs as an independent cross-check on /odom_rf2o, without TF;
+# disable it entirely with rf2o:=false once the EKF is proven.
 #
 # use_ekf:=false restores the old behavior (rf2o owns the TF). Use it if the
 # Teensy still runs firmware older than the ERPM_TO_WHEEL_RADPS=0.01237 fix
 # (tape test 2026-07-20): older firmware under-reports wheel speed, which
 # would skew the EKF.
 # After flashing, calibrate with the tape test (see firmware/include/config.h).
+#
+# CAVEAT hand-push mapping: with micro_ros:=false there is no odom/unfiltered,
+# so the EKF has no velocity input and the odom TF goes stale. The AK10-9s
+# back-drive and their encoders still count when pushed, so keep the agent
+# running (micro_ros:=true) even for hand-push sessions.
 #
 # Do NOT run this alongside the stock linorobot2 bringup -- its EKF also owns
 # odom->base_footprint and the two would conflict.
@@ -149,6 +161,13 @@ def generate_launch_description():
             description='Path to the map_viewer.py web viewer script'
         ),
         DeclareLaunchArgument(
+            name='rf2o',
+            default_value='true',
+            description='Run rf2o laser odometry (topic-only, /odom_rf2o) so it '
+                        'can be compared against the EKF wheel odometry. '
+                        'Set false once the EKF is proven.'
+        ),
+        DeclareLaunchArgument(
             name='slam',
             default_value='true',
             description='Start slam_toolbox (mapping). Set false when running '
@@ -174,7 +193,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             name='use_ekf',
             default_value='true',
-            description='EKF fuses wheel odom + IMU and owns odom->base_footprint '
+            description='EKF filters wheel odom (IMU not fused) and owns odom->base_footprint '
                         '(publishes /odom). Set false to let rf2o own the TF again, '
                         'e.g. with pre-ERPM-fix Teensy firmware (see header comment).'
         ),
@@ -224,9 +243,16 @@ def generate_launch_description():
             ],
         ),
 
-        # IMU: publishes /imu/data only (fused by the EKF). The EKF (or rf2o
+        # IMU: publishes /imu/data only (logged; NOT fused by the EKF since
+        # TESTING.md section 22 -- re-enable imu0 in ekf.yaml once the gyro
+        # scale is proven stable). The EKF (or rf2o
         # with use_ekf:=false) owns odom->base_footprint, so the IMU must NOT
         # publish its own odom TF (they would conflict).
+        # NOTE: the base-controller firmware also publishes imu/data IF it finds an
+        # MPU6050 on its own bus (main.cpp, imu.ok()). The IMU is wired to the
+        # Jetson, so that path stays dormant -- but after any wiring change,
+        # verify `ros2 topic info /imu/data --verbose` shows exactly ONE
+        # publisher (matters again if IMU fusion is re-enabled).
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution(
                 [FindPackageShare('mpu6050_imu'), 'launch', 'imu.launch.py']
@@ -234,8 +260,8 @@ def generate_launch_description():
             launch_arguments={'publish_odom_tf': 'false'}.items()
         ),
 
-        # EKF: fuses the Teensy's 50 Hz wheel odometry (odom/unfiltered) with
-        # the IMU and owns odom->base_footprint. Publishes the fused estimate
+        # EKF: filters the base controller's 50 Hz wheel odometry
+        # (odom/unfiltered; IMU not fused) and owns odom->base_footprint. Publishes the fused estimate
         # on /odom, which Nav2 (bt_navigator, velocity_smoother) subscribes to.
         Node(
             condition=IfCondition(use_ekf),
@@ -247,10 +273,13 @@ def generate_launch_description():
             remappings=[('odometry/filtered', '/odom')],
         ),
 
-        # rf2o laser odometry: matches consecutive scans. With the
-        # EKF active it is a diagnostic cross-check on /odom_rf2o only; with
-        # use_ekf:=false it owns odom->base_footprint as before.
+        # rf2o laser odometry: matches consecutive scans. With the EKF active
+        # it is a diagnostic cross-check on /odom_rf2o only, no TF -- it also
+        # glitches under a cart (legs at point-blank range), which is why the
+        # EKF owns the TF. With use_ekf:=false it owns odom->base_footprint
+        # as before. Disable it entirely with rf2o:=false.
         Node(
+            condition=IfCondition(LaunchConfiguration('rf2o')),
             package='rf2o_laser_odometry',
             executable='rf2o_laser_odometry_node',
             name='rf2o_laser_odometry',
