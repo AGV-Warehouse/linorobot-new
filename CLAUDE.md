@@ -68,6 +68,8 @@ content (`docs/`, `linorobot2_gazebo/`) is mostly untouched reference.
   `--` inside XML comments.
 - `linorobot2_navigation/scripts/pose_keeper.py` — restores AMCL pose on
   startup.
+- `linorobot2_navigation/scripts/object_boxes.py` — stamps the operator
+  app's object boxes into `/map_nav`, the map the global costmap plans on.
 - `linorobot2_bringup/config/box_laser_filter.yaml` — battery-box scan mask.
 - `linorobot2_bringup/launch/robot.launch.py` — main bringup (agent, lidar,
   EKF, map viewer on :8000).

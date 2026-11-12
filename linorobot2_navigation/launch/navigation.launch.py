@@ -59,6 +59,10 @@ def generate_launch_description():
         [FindPackageShare('linorobot2_navigation'), 'scripts', 'pose_keeper.py']
     )
 
+    object_boxes_path = PathJoinSubstitution(
+        [FindPackageShare('linorobot2_navigation'), 'scripts', 'object_boxes.py']
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             name='sim', 
@@ -98,6 +102,15 @@ def generate_launch_description():
                  '--ros-args', '-p',
                  ['restore:=', LaunchConfiguration('restore_pose')]],
             name='pose_keeper',
+            output='screen'
+        ),
+
+        # Republishes /map as /map_nav with the operator app's object boxes
+        # stamped in; the global costmap plans on /map_nav. REQUIRED: without
+        # it the global costmap has no map (see scripts/object_boxes.py).
+        ExecuteProcess(
+            cmd=['python3', object_boxes_path],
+            name='object_boxes',
             output='screen'
         ),
 

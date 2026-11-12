@@ -574,3 +574,38 @@ with `rosbridge:=false`, `ros2 node list` shows neither
 (`ss -tlnp | grep 9090`). Jetson CPU note: rosbridge is idle-cheap but
 serializing `/map` or high-rate `/scan` subscriptions costs CPU — the web
 app should throttle its subscriptions (see `agvapp/docs/ros-bridge-contract.md`).
+
+## 24. Object boxes from the operator app in the global costmap
+
+New node `linorobot2_navigation/scripts/object_boxes.py`, started by
+`navigation.launch.py`. It republishes `/map` as `/map_nav` (latched) with the
+operator app's object boxes (`/object_boxes`, `std_msgs/Float32MultiArray`,
+flat `[xmin, ymin, xmax, ymax, ...]` in map-frame meters) stamped in as
+occupied. `navigation.yaml`: the global costmap's `static_layer.map_topic` is
+now `/map_nav`. AMCL and the local costmap are unchanged, so localization
+still uses the raw `/map`. Effect: the planner routes around a whole table or
+chair instead of between its legs.
+
+With no app connected `/map_nav` equals `/map`. Boxes are kept until replaced
+or until navigation restarts. If the node is not running the global costmap
+has no map and every goal fails to plan.
+
+```bash
+# Mac or Jetson, no ROS needed
+python3 linorobot2_navigation/scripts/object_boxes.py --selftest   # PASS
+
+# Jetson, after colcon build and launching navigation
+ros2 node list | grep object_boxes
+ros2 topic info /map_nav -v | grep -c "Node name"      # 2: object_boxes + global_costmap
+# One 0.5 m box at the map origin (robot stationary; this moves nothing):
+ros2 topic pub --once /object_boxes std_msgs/msg/Float32MultiArray "{data: [0.0, 0.0, 0.5, 0.5]}"
+```
+
+Pass: the node logs `1 object boxes from the app`; in RViz the global costmap
+shows a new inflated square at (0..0.5, 0..0.5). With the app open
+(agvapp `TESTING.md` section 4), a goal behind a boxed object produces a
+`/plan` that goes around the box. Publishing `{data: []}` removes the boxes.
+
+Not yet run on the robot. If goals fail with a planner "start occupied"
+error, the robot is standing inside a box: shrink it with the app's sliders.
+To revert: delete the `map_topic: /map_nav` line.
