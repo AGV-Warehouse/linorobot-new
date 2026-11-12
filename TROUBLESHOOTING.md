@@ -82,6 +82,12 @@ sending a goal; per-stage message counts pinpoint the zeroing layer.
 - `ros2 topic echo /scan` truncates `ranges` — use `--full-length`.
 - The Jetson CPU is the budget: rf2o alone burns ~50% of a core; planner
   and controller rates in `navigation.yaml` were lowered deliberately.
+- `grep -c "Node name"` on `ros2 topic info -v` also counts the
+  `Node namespace` lines (double the endpoints). Use `"Node name:"`.
+- `ros2 topic pub` to a TRANSIENT_LOCAL subscriber (`/object_boxes`) needs
+  `--qos-durability transient_local`, or it never matches and never sends.
+- `pkill -f <pattern>` run from a script/`bash -c` whose own command line
+  contains the pattern kills that shell too. Kill launches by PID.
 
 ## Nucleo FDCAN bring-up
 
@@ -116,3 +122,42 @@ Wiring truth in HARDWARE.md. Debug techniques proven on this board
   recovers on its own once the fault is fixed. If `/motor_current` `[4]`
   keeps climbing back to bus-off, the TX path is still broken.
 - Serial symptoms that mimic all of this: stacked agents (section 1).
+
+## Session notes 2026-11-11 (Nucleo + object-boxes bring-up)
+
+Each of these cost real time; check them first next time.
+
+- **Lidar dies at launch: `Error, unexpected error, code: 80008004`.**
+  `robot.launch.py` defaults `lidar_port:=/dev/rplidar`, a udev symlink that
+  does not exist on this Jetson. The RPLIDAR (CP2102) is `/dev/ttyUSB0`:
+  launch with `lidar_port:=/dev/ttyUSB0` until a udev rule is added.
+- **Nucleo silent: micro-ROS agent runs, no session, no `/odom/unfiltered`,
+  `/cmd_vel` has 0 subscribers.** Diagnosed without touching the board:
+  agent at `-v6` received zero bytes; OpenOCD over the ST-LINK showed 3.26 V,
+  core running, no fault bits; DWT PC sampling put the firmware in
+  `Uart::read()` (waiting for the agent's ping reply). So the firmware was
+  fine and the ST-LINK USB serial bridge was wedged. Fix: **unplug/replug
+  the Nucleo's USB (CN1)**, then restart the agent. Resetting or
+  power-cycling the MCU alone does not re-enumerate `/dev/ttyACM0`.
+  Read-only probe used:
+  `~/.platformio/packages/tool-openocd/bin/openocd -s ~/.platformio/packages/tool-openocd/openocd/scripts -f interface/stlink.cfg -f target/stm32h7x.cfg -c init -c "mdw 0xE000EDF0" -c shutdown`
+- **Nav2 navigation never activates** (`Failed to activate local_costmap
+  because transform from base_footprint to odom did not become available`,
+  `Aborting bringup`): navigation was started while the base had no odom.
+  Once `/odom/unfiltered` flows, restart `navigation.launch.py`; it does
+  not retry by itself.
+- **AGV app can't connect, but SSH from the same Mac works.** rosbridge on
+  :9090 was fine (handshake OK from the Jetson, no firewall, `curl` from the
+  Mac reached :8000). The browser was blocked: Chrome failed even with
+  macOS Privacy > Local Network switched on (it had 7 stale Chrome entries);
+  **Arc worked immediately**. Test with `curl http://<robot-ip>:8000` from the
+  Mac: if curl works and the browser doesn't, it's the browser. Workaround:
+  `ssh -L 9090:localhost:9090 -L 8000:localhost:8000 <user>@<robot-ip>` and
+  `?ros=ws://localhost:9090`.
+- **Robot "stuck in a corner", every goal fails** (`GridBased plugin failed
+  to plan ... Failed to create plan with tolerance`, BackUp recovery, then
+  cancel). The robot marker sat on a mapped wall: AMCL was mislocalized
+  (pose restored by `pose_keeper` was stale), so the start cell is in the
+  wall's inflation and no plan exists. `python3 scan_map_fit.py` scored 34%
+  of scan points on map walls. Fix: **Set Pose** at the true position, check
+  the score rises, then resend the goal. Do not tune the planner for this.

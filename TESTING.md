@@ -596,9 +596,12 @@ python3 linorobot2_navigation/scripts/object_boxes.py --selftest   # PASS
 
 # Jetson, after colcon build and launching navigation
 ros2 node list | grep object_boxes
-ros2 topic info /map_nav -v | grep -c "Node name"      # 2: object_boxes + global_costmap
-# One 0.5 m box at the map origin (robot stationary; this moves nothing):
-ros2 topic pub --once /object_boxes std_msgs/msg/Float32MultiArray "{data: [0.0, 0.0, 0.5, 0.5]}"
+ros2 topic info /map_nav -v | grep -c "Node name:"     # 2: object_boxes + global_costmap
+# One 0.5 m box at the map origin (robot stationary; this moves nothing).
+# The QoS flags are REQUIRED: object_boxes subscribes TRANSIENT_LOCAL, and
+# the CLI's default VOLATILE publisher never matches it (pub waits forever).
+ros2 topic pub --once --qos-durability transient_local --qos-reliability reliable \
+  /object_boxes std_msgs/msg/Float32MultiArray "{data: [0.0, 0.0, 0.5, 0.5]}"
 ```
 
 Pass: the node logs `1 object boxes from the app`; in RViz the global costmap
@@ -606,6 +609,12 @@ shows a new inflated square at (0..0.5, 0..0.5). With the app open
 (agvapp `TESTING.md` section 4), a goal behind a boxed object produces a
 `/plan` that goes around the box. Publishing `{data: []}` removes the boxes.
 
-Not yet run on the robot. If goals fail with a planner "start occupied"
+Run on the robot 2026-11-11 (stationary checks only): object_boxes,
+amcl, map_server once each, no slam_toolbox; `/map_nav` 1 publisher +
+1 subscriber; box and clear logged `1` / `0 object boxes from the app`; the
+app connected via rosbridge and its latched `/object_boxes` matched (rosbridge
+publishes TRANSIENT_LOCAL by default). Planning around a box is **not yet
+verified**: the only goal sent failed because AMCL was mislocalized
+(TROUBLESHOOTING.md, "stuck in a corner"). If goals fail with a planner "start occupied"
 error, the robot is standing inside a box: shrink it with the app's sliders.
 To revert: delete the `map_topic: /map_nav` line.
