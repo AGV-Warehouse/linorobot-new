@@ -8,6 +8,7 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
+#include <std_srvs/srv/empty.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <vda5050_core/execution/protocol_adapter.hpp>
@@ -40,6 +41,9 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reconcile_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Client<std_srvs::srv::Empty>::SharedPtr nomotion_update_;
+  RobotState::Clock::time_point next_nomotion_update_{}, nomotion_response_deadline_{};
+  bool nomotion_pending_=false;
   std::mutex mutex_;
   std::deque<std::function<void()>> callbacks_;
   bool callback_overflow_=false;
@@ -57,6 +61,8 @@ private:
   std::map<std::string,RobotState::Clock::time_point> action_deadlines_;
   std::string localization_id_;
   double max_age_=2, tolerance_=0.12, max_speed_=0.05, max_turn_=0.25;
+  double max_acceleration_=0.05, max_deceleration_=0.1;
+  double initial_pose_covariance_xy_=0.25, initial_pose_covariance_yaw_=0.0685;
   double physical_height_=-1;
   double edge_speed_=0.05, edge_turn_=0.25;
   void enqueue(std::function<void()> callback);

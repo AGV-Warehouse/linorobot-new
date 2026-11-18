@@ -41,3 +41,22 @@ TEST(Orders, OldCompletedOrderNeverRunsAgain) {
   auto second=o;second["orderId"]="second";b.accept(second,"map");b.complete();b.complete();
   EXPECT_THROW(b.accept(o,"map"),std::invalid_argument);
 }
+
+TEST(Orders, ReconciliationRejectsOldIntentAcrossRestart) {
+  Journal journal(":memory:");const auto old=sample();
+  {
+    OrderBook book(journal);book.cancel();book.paused=false;book.accept(old,"map");
+    book.blocked=true;book.paused=true;book.persist();
+    EXPECT_THROW(book.accept(old,"map"),std::invalid_argument);
+    // The reconcile service uses cancel before it explicitly clears pause.
+    book.cancel();EXPECT_TRUE(book.paused);
+    EXPECT_THROW(book.accept(old,"map"),std::invalid_argument);
+  }
+  OrderBook recovered(journal);
+  EXPECT_TRUE(recovered.blocked);EXPECT_TRUE(recovered.paused);
+  recovered.cancel();
+  EXPECT_THROW(recovered.accept(old,"map"),std::invalid_argument);
+  auto fresh=old;fresh["orderId"]="new-explicit-intent";
+  EXPECT_NO_THROW(recovered.accept(fresh,"map"));
+  EXPECT_TRUE(recovered.paused); // Admission alone never resumes execution.
+}

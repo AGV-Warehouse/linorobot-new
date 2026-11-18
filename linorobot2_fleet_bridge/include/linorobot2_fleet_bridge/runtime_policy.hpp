@@ -3,6 +3,19 @@
 #include <cmath>
 #include <cstdint>
 namespace fleet {
+inline double normalized_yaw(double yaw) {
+  return std::atan2(std::sin(yaw),std::cos(yaw));
+}
+// An unconstrained transit node must not silently request a world-east turn.
+inline Pose navigation_target(Pose start, Pose target, bool heading_required) {
+  if(!heading_required && std::hypot(target.x-start.x,target.y-start.y)>1e-9)
+    target.yaw=std::atan2(target.y-start.y,target.x-start.x);
+  return target;
+}
+inline double quaternion_yaw(double x,double y,double z,double w) {
+  return normalized_yaw(std::atan2(2*(w*z+x*y),1-2*(y*y+z*z)));
+}
+
 // A matching old TF is not localization confirmation. Both AMCL and TF must
 // advance past the request; AMCL must also report bounded uncertainty.
 class LocalizationConfirmation {

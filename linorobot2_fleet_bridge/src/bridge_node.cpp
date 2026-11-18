@@ -1,4 +1,6 @@
 #include "linorobot2_fleet_bridge/bridge_node.hpp"
+#include "linorobot2_fleet_bridge/vda_state.hpp"
+#include "linorobot2_fleet_bridge/vda_instant_actions.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -19,7 +21,7 @@ std::string fault_category(const std::string& code) {
 }
 Pose node_pose(const Json& node) {const auto& p=node.at("nodePosition");return {p.at("x"),p.at("y"),p.value("theta",0.0)};}
 }
-BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listener_(tf_) {
+BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listener_(tf_, this, false) {
   commissioned_=declare_parameter("commissioned",false);
   map_=declare_parameter("map_id",std::string("map"));
   serial_=declare_parameter("serial_number",std::string("AGV-01"));
@@ -31,16 +33,23 @@ BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listen
   max_age_=declare_parameter("sensor_max_age_s",2.0);
   tolerance_=declare_parameter("arrival_tolerance_m",0.12);
   max_speed_=declare_parameter("max_speed",0.05); max_turn_=declare_parameter("max_turn",0.25);
+  max_acceleration_=declare_parameter("max_acceleration",0.05);
+  max_deceleration_=declare_parameter("max_deceleration",0.1);
+  initial_pose_covariance_xy_=declare_parameter("initial_pose_covariance_xy",0.25);
+  initial_pose_covariance_yaw_=declare_parameter("initial_pose_covariance_yaw",0.0685);
   navigation_timeout_=declare_parameter("navigation_timeout_s",120.0);
   const auto width=declare_parameter("centre_corridor_half_width",0.15);
-  if(!std::isfinite(max_age_+tolerance_+width+max_speed_+max_turn_+navigation_timeout_) ||
-     max_age_<=0 || tolerance_<=0 || width<=tolerance_ || max_speed_<=0 || max_turn_<=0 || navigation_timeout_<=0)
+  if(!std::isfinite(max_age_+tolerance_+width+max_speed_+max_turn_+navigation_timeout_+max_acceleration_+max_deceleration_+
+                    initial_pose_covariance_xy_+initial_pose_covariance_yaw_) ||
+     max_age_<=0 || tolerance_<=0 || width<=tolerance_ || max_speed_<=0 || max_turn_<=0 || navigation_timeout_<=0 ||
+     max_acceleration_<=0 || max_deceleration_<=0 || initial_pose_covariance_xy_<=0 || initial_pose_covariance_yaw_<=0)
     throw std::invalid_argument("Invalid motion/sensor limits");
   auto path=declare_parameter("journal_path",std::string(""));
   if(path.empty()) path=environment("HOME")+"/.ros/linorobot2_fleet/"+serial_+"/execution.sqlite";
   journal_=std::make_unique<Journal>(path); book_=std::make_unique<OrderBook>(*journal_);
   guard_=std::make_unique<RouteGuard>(width); nav_=std::make_unique<Nav2Executor>(*this,*guard_);
   output_=create_publisher<geometry_msgs::msg::Twist>("fleet/cmd_vel_authorized",10);
+  nomotion_update_=create_client<std_srvs::srv::Empty>("request_nomotion_update");
   initial_pose_=create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("initialpose",10);
   auto qos=rclcpp::SensorDataQoS();
   localization_sub_=create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>("amcl_pose",qos,
@@ -51,7 +60,7 @@ BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listen
       if(age<0 || age>max_age_) return;
       const auto& p=msg->pose.pose;
       localization_confirmation_.observe(stamp.nanoseconds(),{p.position.x,p.position.y,
-        2*std::atan2(p.orientation.z,p.orientation.w)},msg->pose.covariance[0],msg->pose.covariance[7],
+        quaternion_yaw(p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w)},msg->pose.covariance[0],msg->pose.covariance[7],
         msg->pose.covariance[35],tolerance_);
     });
   odom_sub_=create_subscription<nav_msgs::msg::Odometry>("odom",qos,[this](nav_msgs::msg::Odometry::ConstSharedPtr msg){
@@ -109,10 +118,10 @@ BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listen
   // Validate with the pinned VDA types, but retain raw optional fields for profile rejection.
   const auto prefix="uagv/v2/"+manufacturer_+"/"+serial_+"/";
   transport_->subscribe(prefix+"order",[this](auto,auto payload){enqueue([this,payload]{
-    try{const auto raw=Json::parse(payload);(void)raw.get<vt::Order>();receive_order(raw);}
+    try{const Json raw=Json::parse(payload);(void)raw.get<vt::Order>();receive_order(raw);}
     catch(const std::exception&){stop_fault("ORDER_REJECTED");}});},0);
   transport_->subscribe(prefix+"instantActions",[this](auto,auto payload){enqueue([this,payload]{
-    try{const auto raw=Json::parse(payload);(void)raw.get<vt::InstantActions>();receive_actions(raw);}
+    try{const Json raw=Json::parse(payload);validate_instant_actions(raw);receive_actions(raw);}
     catch(const std::exception&){stop_fault("ACTION_REJECTED");}});},0);
   protocol_->connect(); connected_=protocol_->connected();
   timer_=create_wall_timer(std::chrono::milliseconds(50),[this]{tick();});
@@ -202,7 +211,8 @@ void BridgeNode::receive_actions(const Json& message) {
       }
       // Persistent terminal result or pending record; never execute it twice.
       bool found=false;for(auto& a:book_->actions) if(a.at("actionId")==id){a=previous;found=true;}
-      if(!found) book_->actions.push_back(previous);continue;
+      if(!found) {book_->actions.push_back(previous);}
+      continue;
     }
     journal_->put("actionRequest:"+id,action.dump());
     action_state(id,type,"RUNNING");
@@ -221,7 +231,7 @@ void BridgeNode::receive_actions(const Json& message) {
       facts.type_specification.navigation_types={"AUTONOMOUS"};
       facts.physical_parameters.speed_max=max_speed_;
       facts.physical_parameters.angular_speed_max=max_turn_;
-      facts.physical_parameters.acceleration_max=0.05;facts.physical_parameters.deceleration_max=0.1;
+      facts.physical_parameters.acceleration_max=max_acceleration_;facts.physical_parameters.deceleration_max=max_deceleration_;
       facts.physical_parameters.width=0.55;facts.physical_parameters.length=0.55;
       facts.physical_parameters.height_min=physical_height_;facts.physical_parameters.height_max=physical_height_;
       facts.protocol_limits.max_array_lens.order_nodes=100;facts.protocol_limits.max_array_lens.order_edges=99;
@@ -252,7 +262,12 @@ void BridgeNode::receive_actions(const Json& message) {
       geometry_msgs::msg::PoseWithCovarianceStamped pose;pose.header.frame_id="map";pose.header.stamp=now();
       pose.pose.pose.position.x=localization_target_.x;pose.pose.pose.position.y=localization_target_.y;
       pose.pose.pose.orientation.z=std::sin(localization_target_.yaw/2);pose.pose.pose.orientation.w=std::cos(localization_target_.yaw/2);
-      pose.pose.covariance[0]=0.25;pose.pose.covariance[7]=0.25;pose.pose.covariance[35]=0.0685;
+      pose.pose.covariance[0]=initial_pose_covariance_xy_;pose.pose.covariance[7]=initial_pose_covariance_xy_;
+      pose.pose.covariance[35]=initial_pose_covariance_yaw_;
+      // AMCL can stamp its initial estimate with the scan preceding initialpose.
+      // Request subsequent scans without movement; never relax stamp confirmation.
+      nomotion_update_->prune_pending_requests();nomotion_pending_=false;
+      next_nomotion_update_=RobotState::Clock::now()+std::chrono::milliseconds(200);
       localize_action_=action; localization_deadline_=RobotState::Clock::now()+std::chrono::seconds(10);
       localization_confirmation_.begin(rclcpp::Time(pose.header.stamp).nanoseconds(),localization_target_);initial_pose_->publish(pose);
     } else {action_state(id,type,"FAILED","Action unsupported by commissioned straight-route profile");}
@@ -273,7 +288,8 @@ void BridgeNode::tick() {
     if(tf_age>=-0.5 && tf_age<=max_age_) {
       transform_stamp_=rclcpp::Time(transform.header.stamp).nanoseconds();
       robot_.pose={transform.transform.translation.x,transform.transform.translation.y,
-        2*std::atan2(transform.transform.rotation.z,transform.transform.rotation.w)};
+        quaternion_yaw(transform.transform.rotation.x,transform.transform.rotation.y,
+          transform.transform.rotation.z,transform.transform.rotation.w)};
       robot_.pose_at=RobotState::Clock::now();robot_.localized=true;
     } else robot_.localized=false;
   }catch(const tf2::TransformException&) {robot_.localized=false;}
@@ -283,12 +299,25 @@ void BridgeNode::tick() {
     output_->publish(geometry_msgs::msg::Twist());
   }
   if(!localize_action_.is_null()) {
+    if(nomotion_pending_ && RobotState::Clock::now()>=nomotion_response_deadline_) {
+      nomotion_update_->prune_pending_requests();nomotion_pending_=false;
+    }
+    if(RobotState::Clock::now()<localization_deadline_ &&
+       RobotState::Clock::now()>=next_nomotion_update_ && !nomotion_pending_ && nomotion_update_->service_is_ready()) {
+      nomotion_pending_=true;
+      nomotion_response_deadline_=RobotState::Clock::now()+std::chrono::seconds(1);
+      next_nomotion_update_=RobotState::Clock::now()+std::chrono::milliseconds(500);
+      nomotion_update_->async_send_request(std::make_shared<std_srvs::srv::Empty::Request>(),
+        [this](rclcpp::Client<std_srvs::srv::Empty>::SharedFuture){nomotion_pending_=false;});
+    }
     const auto a=localize_action_;const auto id=a.at("actionId").get<std::string>();
     const double yaw_error=std::atan2(std::sin(robot_.pose.yaw-localization_target_.yaw),std::cos(robot_.pose.yaw-localization_target_.yaw));
     if(robot_.localized && localization_confirmation_.confirmed(transform_stamp_,now().nanoseconds(),max_age_) &&
        std::hypot(robot_.pose.x-localization_target_.x,robot_.pose.y-localization_target_.y)<=tolerance_ && std::abs(yaw_error)<0.15) {
       book_->last_node=localization_id_;book_->persist();action_state(id,"initPosition","FINISHED");localize_action_=nullptr;
-    } else if(RobotState::Clock::now()>localization_deadline_) {action_state(id,"initPosition","FAILED","Localization confirmation timed out");localize_action_=nullptr;}
+      nomotion_update_->prune_pending_requests();nomotion_pending_=false;
+    } else if(RobotState::Clock::now()>localization_deadline_) {action_state(id,"initPosition","FAILED","Localization confirmation timed out");localize_action_=nullptr;
+      nomotion_update_->prune_pending_requests();nomotion_pending_=false;}
   }
   if(robot_.ready(max_age_) && robot_.stopped() && !nav_->busy()) {
     const auto actions=book_->actions;
@@ -310,7 +339,7 @@ void BridgeNode::tick() {
   if(ready && !book_->paused && !book_->blocked && !nav_->busy()) {
     const auto target=book_->next();
     if(!target.is_null()) {
-      const auto pose=node_pose(target);
+      auto pose=node_pose(target);
       if(book_->index==0 && robot_.stopped() && std::hypot(pose.x-robot_.pose.x,pose.y-robot_.pose.y)<=tolerance_) book_->complete();
       else if(book_->index==0) {book_->blocked=true;error_="START_NODE_POSITION_CHANGED";book_->persist();}
       else {
@@ -318,6 +347,7 @@ void BridgeNode::tick() {
         edge_speed_=std::min(max_speed_,edge.value("maxSpeed",max_speed_));
         edge_turn_=edge.value("rotationAllowed",true)?std::min(max_turn_,edge.value("maxRotationSpeed",max_turn_)):0.0;
         const auto start=node_pose(book_->order.at("nodes")[book_->index-1]);
+        pose=navigation_target(start,pose,target.at("nodePosition").contains("theta"));
         guard_->authorize(start,pose);
         if(!guard_->contains(robot_.pose)) {book_->blocked=true;error_="OUTSIDE_AUTHORIZED_ROUTE";book_->persist();}
         else {navigation_deadline_=RobotState::Clock::now()+std::chrono::milliseconds(static_cast<int>(navigation_timeout_*1000));
@@ -348,16 +378,15 @@ void BridgeNode::publish_state() {
   Json errors=Json::array();
   if(!error_.empty() || !robot_.ready(max_age_) || !commissioned_ || book_->blocked)
     errors.push_back({{"errorType",error_.empty()?"ROBOT_NOT_READY":error_},{"errorLevel","FATAL"}});
-  Json state={{"headerId",0},{"timestamp","2026-01-01T00:00:00Z"},{"version","2.0.0"},{"manufacturer",manufacturer_},{"serialNumber",serial_},
-    {"orderId",book_->order.value("orderId",std::string(""))},{"orderUpdateId",book_->order.value("orderUpdateId",0)},
+  Json state={{"orderId",book_->order.value("orderId",std::string(""))},{"orderUpdateId",book_->order.value("orderUpdateId",0)},
     {"lastNodeId",book_->last_node},{"lastNodeSequenceId",book_->last_sequence},
     {"nodeStates",nodes},{"edgeStates",edges},{"driving",!robot_.stopped()}, {"paused",book_->paused},
     {"actionStates",book_->actions},{"batteryState",{{"batteryCharge",*robot_.battery},{"charging",robot_.charging}}},
     {"operatingMode","AUTOMATIC"},{"errors",errors},
     {"safetyState",{{"eStop",robot_.e_stop},{"fieldViolation",robot_.field_violation}}},
-    {"agvPosition",{{"positionInitialized",robot_.localized && robot_.ready(max_age_)},{"x",robot_.pose.x},{"y",robot_.pose.y},{"theta",robot_.pose.yaw},{"mapId",map_}}},
+    {"agvPosition",{{"positionInitialized",robot_.localized && robot_.ready(max_age_)},{"x",robot_.pose.x},{"y",robot_.pose.y},{"theta",normalized_yaw(robot_.pose.yaw)},{"mapId",map_}}},
     {"velocity",{{"vx",robot_.vx},{"vy",0},{"omega",robot_.wz}}}};
-  try {protocol_->publish(state.get<vt::State>(),0);}catch(const std::exception& e){RCLCPP_ERROR(get_logger(),"State serialization: %s",e.what());}
+  try {protocol_->publish(state_from_payload(std::move(state)),0);}catch(const std::exception& e){RCLCPP_ERROR(get_logger(),"State serialization: %s",e.what());}
 }
 }
 int main(int argc,char** argv) {
