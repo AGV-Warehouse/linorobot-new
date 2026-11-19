@@ -33,7 +33,7 @@ jobs:
           source /opt/ros/jazzy/setup.bash
           export CMAKE_PREFIX_PATH=/opt/vda5050:${CMAKE_PREFIX_PATH:-}
           cd ws
-          colcon build --packages-select linorobot2_fleet_bridge
+          colcon build --packages-up-to linorobot2_fleet_bridge
           source install/setup.bash
           colcon test --packages-select linorobot2_fleet_bridge --event-handlers console_direct+
           colcon test-result --verbose
