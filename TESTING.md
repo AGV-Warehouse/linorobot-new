@@ -454,3 +454,29 @@ controller/base watchdog stops output after process death. Triggering real motio
 requires explicit safe-to-move authorization. An openTCS-only failure with Broker
 alive permits the previously released base to finish; this profile has no master
 heartbeat lease. See Fleetserver/docs/OPERATIONS.zh-CN.md for the recovery matrix.
+
+## Fleet bridge station actions (2026-11-20)
+
+**What changed.** Order nodes may carry typed VDA 2.0 actions (openTCS sends them
+for a destination operation other than NOP): `waitForTrigger`, `pick`, `drop`
+(finish only when an operator confirms) and `startCharging` / `stopCharging`.
+Motion waits until the reached node's actions are FINISHED/FAILED. Confirmation
+arrives as the `operatorConfirm` instant action (portal → gateway → openTCS) or
+the `fleet/operator_confirm` service (for a physical button). Charging publishes
+`fleet/charging_request` (std_msgs/Bool, transient local) and finishes once
+`battery_state` reports CHARGING (`charging_timeout_s`, default 30 s). On the
+real robot nothing serves the charger request yet, so `startCharging` FAILS
+after the timeout; no lift or docking actions exist.
+
+**Pass criteria.**
+- `colcon test --packages-select linorobot2_fleet_bridge`: all tests pass,
+  including `test_node_actions` (unsupported/duplicate actions rejected, actions
+  WAITING until arrival, reused openTCS action IDs start WAITING).
+- SIM: a pick→drop task stops at each station until confirmed; a charge task at a
+  charging station turns the openTCS vehicle state to CHARGING.
+
+**Commands (robot, wheels up, only when asked):**
+```bash
+ros2 service call /fleet/operator_confirm std_srvs/srv/Trigger   # confirm a waiting station action
+ros2 topic echo /fleet/charging_request                           # what the bridge asks the charger
+```
