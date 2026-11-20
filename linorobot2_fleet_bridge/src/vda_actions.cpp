@@ -92,9 +92,15 @@ void OrderBook::accept(const Json& incoming,const std::string& map_id) {
     if(nodes.front().at("sequenceId")!=0) fail("New order must start at sequence zero");
     if(!pending_node_actions().empty()) fail("Station actions of the previous order are still running");
     // Instant actions have their own lifetime; a new order must not erase a pending pause/cancel.
-    // openTCS reuses destination action IDs across orders: forget old results with the same ID.
-    for(const auto& node:nodes) for(const auto& a:node.value("actions",Json::array()))
-      actions.erase(std::remove_if(actions.begin(),actions.end(),[&](const Json& s){return s.at("actionId")==a.at("actionId");}),actions.end());
+    // openTCS reuses destination action IDs across orders (Order_destination_action_<routeIndex>),
+    // and a later update may add a node action with the ID of a finished one: forget the
+    // previous order's node action results, and any with an ID of the new message.
+    auto forget=[&](const Json& graph){
+      for(const auto& node:graph) for(const auto& a:node.value("actions",Json::array()))
+        actions.erase(std::remove_if(actions.begin(),actions.end(),[&](const Json& s){return s.at("actionId")==a.at("actionId");}),actions.end());
+    };
+    if(!order.empty()) forget(order.at("nodes"));
+    forget(nodes);
     order=incoming; index=0;
   }
   // Every node action is reported as WAITING until the robot reaches its node.

@@ -52,3 +52,17 @@ TEST(NodeActions, NextOrderWaitsForStationAndForgetsReusedIds) {
   ASSERT_EQ(b.actions.size(),1u);
   EXPECT_EQ(b.actions[0]["actionType"],"drop");EXPECT_EQ(b.actions[0]["actionStatus"],"WAITING");
 }
+TEST(NodeActions, ReusedIdInLaterUpdateOfNextOrderStartsWaiting) {
+  // openTCS numbers destination actions by route index: the drop of the next
+  // drive order can reuse the pick's ID and arrive only in a later update.
+  Journal j(":memory:");OrderBook b(j);b.cancel();
+  b.accept(station_order("o1","pick"),"map");b.complete();b.complete();set_status(b,"FINISHED");
+  auto next=station_order("o2","drop");
+  auto first=next;first["nodes"][1]["released"]=false;first["edges"][0]["released"]=false;
+  first["nodes"][1]["actions"]=Json::array();
+  b.accept(first,"map");
+  auto update=next;update["orderUpdateId"]=1;
+  b.accept(update,"map");
+  ASSERT_EQ(b.actions.size(),1u);
+  EXPECT_EQ(b.actions[0]["actionType"],"drop");EXPECT_EQ(b.actions[0]["actionStatus"],"WAITING");
+}
