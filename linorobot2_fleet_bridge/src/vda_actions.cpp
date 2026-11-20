@@ -1,7 +1,9 @@
 #include "linorobot2_fleet_bridge/vda_actions.hpp"
+#include "linorobot2_fleet_bridge/node_actions.hpp"
 #include <stdexcept>
 #include <cmath>
 #include <limits>
+#include <algorithm>
 namespace fleet {
 OrderBook::OrderBook(Journal& journal):journal_(journal) {
   if(auto saved=journal_.get("execution")) {
@@ -43,7 +45,7 @@ void OrderBook::accept(const Json& incoming,const std::string& map_id) {
     const auto& node=nodes[i]; const auto& pos=node.at("nodePosition");
     if(node.at("nodeId").get<std::string>().empty() || node.at("nodeId").get<std::string>().size()>128) fail("Invalid node ID");
     if(sequence(node.at("sequenceId"))!=sequence(nodes.front().at("sequenceId"))+2*i) fail("Nonconsecutive sequence");
-    if(!node.value("actions",Json::array()).empty()) fail("Node actions unsupported by this profile");
+    validate_node_actions(node.value("actions",Json::array()));
     if(pos.at("mapId")!=map_id) fail("Wrong map");
     for(const auto* axis:{"x","y"}) if(!std::isfinite(pos.at(axis).get<double>())) fail("Nonfinite position");
     if(pos.contains("theta") && !std::isfinite(pos.at("theta").get<double>())) fail("Nonfinite heading");
@@ -88,10 +90,28 @@ void OrderBook::accept(const Json& incoming,const std::string& map_id) {
   } else {
     if(!order.empty() && index<order.at("nodes").size()) fail("Active order must be cancelled first");
     if(nodes.front().at("sequenceId")!=0) fail("New order must start at sequence zero");
+    if(!pending_node_actions().empty()) fail("Station actions of the previous order are still running");
     // Instant actions have their own lifetime; a new order must not erase a pending pause/cancel.
+    // openTCS reuses destination action IDs across orders: forget old results with the same ID.
+    for(const auto& node:nodes) for(const auto& a:node.value("actions",Json::array()))
+      actions.erase(std::remove_if(actions.begin(),actions.end(),[&](const Json& s){return s.at("actionId")==a.at("actionId");}),actions.end());
     order=incoming; index=0;
   }
+  // Every node action is reported as WAITING until the robot reaches its node.
+  for(const auto& node:nodes) for(const auto& a:node.value("actions",Json::array()))
+    if(std::none_of(actions.begin(),actions.end(),[&](const Json& s){return s.at("actionId")==a.at("actionId");}))
+      actions.push_back({{"actionId",a.at("actionId")},{"actionType",a.at("actionType")},{"actionStatus","WAITING"},{"resultDescription",""}});
   last_message=incoming; persist();
+}
+Json OrderBook::pending_node_actions() const {
+  // Actions of the node the robot reached last; motion waits until all are FINISHED/FAILED.
+  Json pending=Json::array();
+  if(order.empty() || index==0) return pending;
+  for(const auto& a:order.at("nodes")[index-1].value("actions",Json::array()))
+    for(const auto& s:actions) if(s.at("actionId")==a.at("actionId") && !terminal_status(s.at("actionStatus"))) {
+      Json item=a;item["actionStatus"]=s.at("actionStatus");pending.push_back(item);
+    }
+  return pending;
 }
 Json OrderBook::next() const {
   if(order.empty() || index>=order.at("nodes").size() || !order.at("nodes")[index].at("released").get<bool>()) return nullptr;

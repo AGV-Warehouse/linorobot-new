@@ -3,7 +3,7 @@
 #include "linorobot2_fleet_bridge/execution_journal.hpp"
 namespace fleet {
 using Json=nlohmann::json;
-// Deliberately narrow VDA 2.0 profile: straight edges, no transport/load actions.
+// Deliberately narrow VDA 2.0 profile: straight edges; node actions limited to node_actions.hpp.
 // Validation and durable execution ownership live here, not in a demo Adapter.
 class OrderBook {
 public:
@@ -14,6 +14,8 @@ public:
   void cancel();
   void persist();
   Json snapshot() const;
+  // Node actions of the last reached node that are not FINISHED/FAILED yet.
+  Json pending_node_actions() const;
   Json actions=Json::array();
   Json order=Json::object();
   Json last_message=Json::object();

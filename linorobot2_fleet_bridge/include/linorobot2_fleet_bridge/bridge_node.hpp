@@ -7,6 +7,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <std_srvs/srv/empty.hpp>
 #include <tf2_ros/buffer.h>
@@ -15,6 +16,7 @@
 #include "linorobot2_fleet_bridge/nav2_executor.hpp"
 #include "linorobot2_fleet_bridge/robot_state.hpp"
 #include "linorobot2_fleet_bridge/vda_actions.hpp"
+#include "linorobot2_fleet_bridge/node_actions.hpp"
 #include "linorobot2_fleet_bridge/mqtt_transport.hpp"
 #include "linorobot2_fleet_bridge/runtime_policy.hpp"
 namespace fleet {
@@ -40,6 +42,13 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr output_;
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reconcile_;
+  // Station actions: a physical button (or the portal via VDA instant action) confirms.
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr operator_confirm_;
+  // Charger request for the robot's charging contacts (the sim models the charger).
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr charging_request_;
+  bool charging_requested_=false;
+  std::map<std::string,RobotState::Clock::time_point> charging_deadlines_;
+  double charging_timeout_=30;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Client<std_srvs::srv::Empty>::SharedPtr nomotion_update_;
   RobotState::Clock::time_point next_nomotion_update_{}, nomotion_response_deadline_{};
@@ -73,6 +82,12 @@ private:
   void connection(bool online);
   void stop_fault(const std::string& code);
   void log_event(const std::string& category,const std::string& code,const Json& fields=Json::object());
-  void action_state(const std::string& id,const std::string& type,const std::string& status,const std::string& reason="");
+  void action_state(const std::string& id,const std::string& type,const std::string& status,const std::string& reason="",bool deadline=true);
+  // Starts/advances typed actions of the last reached node; true while they still block motion.
+  bool run_node_actions();
+  // Finishes the station action waiting for an operator; returns an error text or "".
+  std::string confirm_operator(const std::string& action_id);
+  void fail_node_actions(const std::string& reason);
+  void request_charging(bool on);
 };
 }

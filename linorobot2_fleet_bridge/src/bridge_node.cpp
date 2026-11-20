@@ -38,6 +38,8 @@ BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listen
   initial_pose_covariance_xy_=declare_parameter("initial_pose_covariance_xy",0.25);
   initial_pose_covariance_yaw_=declare_parameter("initial_pose_covariance_yaw",0.0685);
   navigation_timeout_=declare_parameter("navigation_timeout_s",120.0);
+  charging_timeout_=declare_parameter("charging_timeout_s",30.0);
+  if(!std::isfinite(charging_timeout_) || charging_timeout_<=0) throw std::invalid_argument("Invalid charging timeout");
   const auto width=declare_parameter("centre_corridor_half_width",0.15);
   if(!std::isfinite(max_age_+tolerance_+width+max_speed_+max_turn_+navigation_timeout_+max_acceleration_+max_deceleration_+
                     initial_pose_covariance_xy_+initial_pose_covariance_yaw_) ||
@@ -104,9 +106,15 @@ BridgeNode::BridgeNode():Node("linorobot2_fleet_bridge"),tf_(get_clock()),listen
       robot_.ready(max_age_) && robot_.stopped() && !nav_->busy();
     if(response->success) {
       const auto pending=book_->actions;
+      fail_node_actions("Locally reconciled");
       for(const auto& a:pending) if(a.at("actionStatus")=="RUNNING") action_state(a.at("actionId"),a.at("actionType"),"FAILED","Locally reconciled");
       book_->cancel();book_->paused=false;book_->persist();error_.clear();log_event("audit","LOCAL_RECONCILED");}
     response->message=response->success?"Old order discarded locally; ready for a fresh order":"Commissioning, fresh sensors and stationary robot required";
+  });
+  charging_request_=create_publisher<std_msgs::msg::Bool>("fleet/charging_request",rclcpp::QoS(1).transient_local());
+  operator_confirm_=create_service<std_srvs::srv::Trigger>("fleet/operator_confirm",[this](std::shared_ptr<std_srvs::srv::Trigger::Request>,std::shared_ptr<std_srvs::srv::Trigger::Response> response){
+    response->message=confirm_operator("");response->success=response->message.empty();
+    if(response->success) response->message="Station action confirmed";
   });
   const auto broker=declare_parameter("mqtt_broker",std::string("ssl://localhost:8883"));
   transport_=std::make_shared<MqttTransport>(broker,"fleet-"+serial_);
@@ -177,8 +185,8 @@ void BridgeNode::receive_order(const Json& order) {
   }
   book_->accept(order,map_);error_.clear();log_event("execution","ORDER_ACCEPTED",{{"orderUpdateId",order.at("orderUpdateId")}});
 }
-void BridgeNode::action_state(const std::string& id,const std::string& type,const std::string& status,const std::string& reason) {
-  if(status=="RUNNING") action_deadlines_[id]=RobotState::Clock::now()+std::chrono::seconds(10);
+void BridgeNode::action_state(const std::string& id,const std::string& type,const std::string& status,const std::string& reason,bool deadline) {
+  if(status=="RUNNING" && deadline) action_deadlines_[id]=RobotState::Clock::now()+std::chrono::seconds(10);
   else action_deadlines_.erase(id);
   Json value={{"actionId",id},{"actionType",type},{"actionStatus",status},{"resultDescription",reason}};
   bool found=false;
@@ -238,6 +246,7 @@ void BridgeNode::receive_actions(const Json& message) {
       protocol_->publish(facts,0);action_state(id,type,"FINISHED");
     }
     else if(type=="startPause" || type=="cancelOrder") {
+      if(type=="cancelOrder") fail_node_actions("Order cancelled");
       book_->paused=true;nav_->cancel();book_->persist();
       // tick waits for real odometry to confirm stationary before FINISHED.
     } else if(type=="stopPause") {
@@ -270,6 +279,15 @@ void BridgeNode::receive_actions(const Json& message) {
       next_nomotion_update_=RobotState::Clock::now()+std::chrono::milliseconds(200);
       localize_action_=action; localization_deadline_=RobotState::Clock::now()+std::chrono::seconds(10);
       localization_confirmation_.begin(rclcpp::Time(pose.header.stamp).nanoseconds(),localization_target_);initial_pose_->publish(pose);
+    } else if(type=="operatorConfirm") {
+      // Remote confirmation of a station action (portal -> openTCS -> instant action).
+      std::string target;
+      for(const auto& p:action.value("actionParameters",Json::array())) if(p.at("key")=="actionId")
+        target=p.at("value").is_string()?p.at("value").get<std::string>():p.at("value").dump();
+      const auto error=confirm_operator(target);
+      action_state(id,type,error.empty()?"FINISHED":"FAILED",error);
+    } else if(type=="stopCharging") {
+      request_charging(false);  // tick finishes it once the battery stops reporting charging
     } else {action_state(id,type,"FAILED","Action unsupported by commissioned straight-route profile");}
     } catch(const std::exception& e) {action_state(id,type,"FAILED",e.what());}
   }
@@ -329,6 +347,8 @@ void BridgeNode::tick() {
       if(type=="startPause") action_state(a.at("actionId"),type,"FINISHED");
     }
   }
+  for(const auto& a:book_->actions) if(a.at("actionStatus")=="RUNNING" && a.at("actionType")=="stopCharging" &&
+     action_deadlines_.count(a.at("actionId").get<std::string>()) && !robot_.charging) action_state(a.at("actionId"),"stopCharging","FINISHED");
   const auto pending_actions=book_->actions;
   for(const auto& a:pending_actions) if(a.at("actionStatus")=="RUNNING") {
     const std::string id=a.at("actionId");const auto deadline=action_deadlines_.find(id);
@@ -336,7 +356,8 @@ void BridgeNode::tick() {
       action_state(id,a.at("actionType"),"FAILED","Physical confirmation deadline exceeded");stop_fault("ACTION_TIMEOUT");
     }
   }
-  if(ready && !book_->paused && !book_->blocked && !nav_->busy()) {
+  const bool station_busy=run_node_actions();
+  if(ready && !book_->paused && !book_->blocked && !nav_->busy() && !station_busy) {
     const auto target=book_->next();
     if(!target.is_null()) {
       auto pose=node_pose(target);
@@ -350,7 +371,8 @@ void BridgeNode::tick() {
         pose=navigation_target(start,pose,target.at("nodePosition").contains("theta"));
         guard_->authorize(start,pose);
         if(!guard_->contains(robot_.pose)) {book_->blocked=true;error_="OUTSIDE_AUTHORIZED_ROUTE";book_->persist();}
-        else {navigation_deadline_=RobotState::Clock::now()+std::chrono::milliseconds(static_cast<int>(navigation_timeout_*1000));
+        else {if(charging_requested_) request_charging(false);
+        navigation_deadline_=RobotState::Clock::now()+std::chrono::milliseconds(static_cast<int>(navigation_timeout_*1000));
         const bool heading_required=target.at("nodePosition").contains("theta");
         if(!nav_->start(pose,[this,pose,heading_required](bool ok){
           const double yaw_error=std::atan2(std::sin(pose.yaw-robot_.pose.yaw),std::cos(pose.yaw-robot_.pose.yaw));
@@ -366,6 +388,56 @@ void BridgeNode::tick() {
     // VDA 2.0 requires numeric battery/safety fields. Do not publish fabricated healthy values.
     if(robot_.battery && !robot_.e_stop.empty()) {if(!online_) connection(true);publish_state();}
   }
+}
+bool BridgeNode::run_node_actions() {
+  const auto pending=book_->pending_node_actions();
+  if(pending.empty()) return false;
+  if(book_->blocked) return true;  // a fault holds the station; reconcile fails its actions
+  // Station actions run one after another; motion waits until all are FINISHED/FAILED.
+  const auto& a=pending.front();
+  const std::string id=a.at("actionId"), type=a.at("actionType"), status=a.at("actionStatus");
+  const auto kind=action_kind(type);
+  const auto clock=RobotState::Clock::now();
+  const bool charger=kind==ActionKind::StartCharging || kind==ActionKind::StopCharging;
+  if(status=="WAITING") {
+    if(charger) {request_charging(kind==ActionKind::StartCharging);
+      charging_deadlines_[id]=clock+std::chrono::milliseconds(static_cast<int>(charging_timeout_*1000));}
+    action_state(id,type,"RUNNING",needs_operator(kind)?"Waiting for operator confirmation":"",false);
+    if(needs_operator(kind)) log_event("execution","OPERATOR_CONFIRM_REQUIRED",{{"actionId",id},{"actionType",type}});
+  } else if(charger) {
+    if(!charging_deadlines_.count(id)) charging_deadlines_[id]=clock+std::chrono::milliseconds(static_cast<int>(charging_timeout_*1000));
+    const bool done=kind==ActionKind::StartCharging?robot_.charging:!robot_.charging;
+    if(done) {charging_deadlines_.erase(id);action_state(id,type,"FINISHED","",false);}
+    else if(clock>charging_deadlines_[id]) {
+      charging_deadlines_.erase(id);
+      if(kind==ActionKind::StartCharging) request_charging(false);
+      action_state(id,type,"FAILED","Charger did not confirm within the charging timeout",false);
+      log_event("execution","CHARGER_NOT_CONFIRMED",{{"actionId",id}});
+    }
+  }
+  return true;
+}
+std::string BridgeNode::confirm_operator(const std::string& target) {
+  for(const auto& a:book_->pending_node_actions()) {
+    if(a.at("actionStatus")!="RUNNING" || !needs_operator(action_kind(a.at("actionType")))) continue;
+    if(!target.empty() && a.at("actionId")!=target) continue;
+    action_state(a.at("actionId"),a.at("actionType"),"FINISHED","Confirmed by operator",false);
+    log_event("audit","OPERATOR_CONFIRMED",{{"actionId",a.at("actionId")},{"actionType",a.at("actionType")}});
+    return "";
+  }
+  return "No station action is waiting for confirmation";
+}
+void BridgeNode::fail_node_actions(const std::string& reason) {
+  if(book_->order.empty()) return;
+  for(const auto& node:book_->order.at("nodes")) for(const auto& a:node.value("actions",Json::array()))
+    for(const auto& s:Json(book_->actions)) if(s.at("actionId")==a.at("actionId") && !terminal_status(s.at("actionStatus"))) {
+      charging_deadlines_.erase(a.at("actionId").get<std::string>());
+      action_state(a.at("actionId"),a.at("actionType"),"FAILED",reason,false);
+    }
+}
+void BridgeNode::request_charging(bool on) {
+  std_msgs::msg::Bool message;message.data=on;charging_request_->publish(message);charging_requested_=on;
+  log_event("execution",on?"CHARGING_REQUESTED":"CHARGING_RELEASED");
 }
 void BridgeNode::publish_state() {
   Json nodes=Json::array(),edges=Json::array();
