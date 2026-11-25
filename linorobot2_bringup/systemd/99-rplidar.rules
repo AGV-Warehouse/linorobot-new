@@ -1,0 +1,2 @@
+# RPLIDAR (Silicon Labs CP2102) -> /dev/rplidar, the default lidar_port in robot.launch.py
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="rplidar", MODE="0666"

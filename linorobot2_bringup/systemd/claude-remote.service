@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude Code Remote Control in the linorobot-new repo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=hjt-2
+WorkingDirectory=/home/hjt-2/linorobot2_ws/src/linorobot-new
+Environment=PATH=/home/hjt-2/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/hjt-2/.local/bin/claude remote-control --name agv-jetson
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

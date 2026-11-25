@@ -1,0 +1,16 @@
+[Unit]
+Description=AGV Nav2 navigation on the saved map
+After=agv-bringup.service
+Requires=agv-bringup.service
+PartOf=agv-bringup.service
+
+[Service]
+User=hjt-2
+ExecStart=/home/hjt-2/linorobot2_ws/src/linorobot-new/linorobot2_bringup/systemd/agv-start.sh navigation
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

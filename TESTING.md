@@ -618,3 +618,28 @@ verified**: the only goal sent failed because AMCL was mislocalized
 (TROUBLESHOOTING.md, "stuck in a corner"). If goals fail with a planner "start occupied"
 error, the robot is standing inside a box: shrink it with the app's sliders.
 To revert: delete the `map_topic: /map_nav` line.
+
+## 25. Start bringup, navigation and Claude Remote Control at boot
+
+What changed: `linorobot2_bringup/systemd/` adds three systemd units, a launcher
+script and a udev rule. `agv-bringup` runs `robot.launch.py slam:=false` once
+`/dev/ttyACM0` and the lidar exist (it refuses to start a second micro-ROS agent
+if the port is busy). `agv-navigation` waits for `/odom/unfiltered`, then starts
+`navigation.launch.py` on `maps/map_new.yaml` (override with `AGV_MAP=`).
+`claude-remote` runs `claude remote-control --name agv-jetson` in this repo.
+`99-rplidar.rules` creates `/dev/rplidar`.
+
+Install (once): `sudo linorobot2_bringup/systemd/install.sh`
+
+Pass criteria, after `sudo reboot` with nothing started by hand:
+- `ls -l /dev/rplidar` points at the CP2102 tty.
+- `systemctl status agv-bringup agv-navigation claude-remote` are all `active (running)`.
+- `fuser -v /dev/ttyACM0` shows exactly one micro_ros_agent.
+- `ros2 topic hz /odom/unfiltered` and `/scan` both publish; Nav2 nodes are active
+  (`ros2 lifecycle get /bt_navigator` = active).
+- The AGV app connects on :9090 and the robot pose is on the map (re-set the pose if not).
+- claude.ai/code (or the Claude app) lists the session `agv-jetson`.
+- The robot does not move until a goal is sent.
+
+Logs: `journalctl -u agv-bringup -u agv-navigation -u claude-remote -f`.
+Manual work: `sudo systemctl stop agv-navigation agv-bringup` before launching by hand.
