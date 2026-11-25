@@ -631,6 +631,11 @@ if the port is busy). `agv-navigation` waits for `/odom/unfiltered`, then starts
 
 Install (once): `sudo linorobot2_bringup/systemd/install.sh`
 
+Also once: run `claude` in this repo and accept the workspace trust prompt.
+Otherwise `claude-remote` loops on `Error: Workspace not trusted` (systemd has
+no terminal to show the dialog). The Remote Control link is printed in
+`journalctl -u claude-remote`.
+
 Pass criteria, after `sudo reboot` with nothing started by hand:
 - `ls -l /dev/rplidar` points at the CP2102 tty.
 - `systemctl status agv-bringup agv-navigation claude-remote` are all `active (running)`.
